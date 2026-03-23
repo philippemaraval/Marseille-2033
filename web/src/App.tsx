@@ -14,6 +14,16 @@ import {
   TileLayer,
   useMapEvents,
 } from 'react-leaflet'
+import {
+  type FeatureVersion,
+  type TrashFeature,
+  fetchFeatureVersions,
+  fetchTrashFromSupabase,
+  moveFeatureToTrash,
+  persistLayerSortOrder,
+  restoreFeatureFromTrash,
+  restorePreviousFeatureVersion,
+} from './data/adminSupabase'
 import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
 import { layerMeta, layers as fallbackLayers } from './data/layers'
 import { hasSupabase, supabase } from './lib/supabase'
@@ -128,6 +138,14 @@ const ADMIN_MODE_LABELS: Record<AdminMode, string> = {
   view: 'Lecture',
   create: 'Creation',
   edit: 'Edition',
+  delete: 'Suppression',
+}
+
+const VERSION_OPERATION_LABELS: Record<string, string> = {
+  insert: 'Creation',
+  update: 'Modification',
+  trash: 'Corbeille',
+  restore: 'Restauration',
   delete: 'Suppression',
 }
 
@@ -280,6 +298,13 @@ function buildDefaultDraft(layerList: LayerConfig[]): CreateDraft {
   }
 }
 
+function getLayerSortOrderValue(layer: LayerConfig, fallback = 0): number {
+  if (typeof layer.sortOrder === 'number' && Number.isFinite(layer.sortOrder)) {
+    return layer.sortOrder
+  }
+  return fallback
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -312,6 +337,10 @@ function App() {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [editPoints, setEditPoints] = useState<LatLngTuple[]>([])
   const [isRedrawingEditGeometry, setIsRedrawingEditGeometry] = useState(false)
+  const [trashItems, setTrashItems] = useState<TrashFeature[]>([])
+  const [isTrashLoading, setIsTrashLoading] = useState(false)
+  const [versionItems, setVersionItems] = useState<FeatureVersion[]>([])
+  const [isVersionsLoading, setIsVersionsLoading] = useState(false)
 
   const supabaseEnvDiagnostic = useMemo(() => {
     const urlValue = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -514,14 +543,74 @@ function App() {
   const layerSuggestions = useMemo(
     () =>
       layers
-        .map((layer) => ({
+        .map((layer, index) => ({
           id: layer.id,
           label: layer.label,
           category: layer.category,
+          sortOrder: getLayerSortOrderValue(layer, index),
         }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'fr')),
+        .sort((a, b) => {
+          const byCategory = a.category.localeCompare(b.category, 'fr')
+          if (byCategory !== 0) {
+            return byCategory
+          }
+          if (a.sortOrder !== b.sortOrder) {
+            return a.sortOrder - b.sortOrder
+          }
+          return a.label.localeCompare(b.label, 'fr')
+        }),
     [layers],
   )
+
+  const refreshTrash = useCallback(async () => {
+    if (!isAdmin) {
+      setTrashItems([])
+      return
+    }
+
+    setIsTrashLoading(true)
+    const result = await fetchTrashFromSupabase()
+    setIsTrashLoading(false)
+
+    if (!result.ok) {
+      setAdminNotice(`Erreur corbeille: ${result.error}`)
+      return
+    }
+
+    setTrashItems(result.data)
+  }, [isAdmin])
+
+  const refreshFeatureVersions = useCallback(
+    async (featureId: string | null) => {
+      if (!isAdmin || !featureId) {
+        setVersionItems([])
+        return
+      }
+
+      setIsVersionsLoading(true)
+      const result = await fetchFeatureVersions(featureId)
+      setIsVersionsLoading(false)
+
+      if (!result.ok) {
+        setAdminNotice(`Erreur versions: ${result.error}`)
+        return
+      }
+
+      setVersionItems(result.data)
+    },
+    [isAdmin],
+  )
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void refreshTrash()
+      void refreshFeatureVersions(selectedFeatureId)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [isAdmin, refreshFeatureVersions, refreshTrash, selectedFeatureId])
 
   const toggleLayer = (id: string) => {
     setActiveLayers((current) => ({
@@ -552,12 +641,13 @@ function App() {
         setIsRedrawingEditGeometry(false)
       }
       setAdminNotice(null)
+      void refreshFeatureVersions(featureId)
       if (adminMode === 'delete' || adminMode === 'edit') {
         return
       }
       setAdminMode('edit')
     },
-    [adminMode, featureById, isAdmin],
+    [adminMode, featureById, isAdmin, refreshFeatureVersions],
   )
 
   const handleMapClick = useCallback(
@@ -613,6 +703,7 @@ function App() {
     }
 
     setAdminPassword('')
+    void refreshTrash()
     setAdminNotice('Mode admin active.')
   }
 
@@ -632,6 +723,8 @@ function App() {
     setEditDraft(null)
     setEditPoints([])
     setIsRedrawingEditGeometry(false)
+    setTrashItems([])
+    setVersionItems([])
     setAdminNotice('Mode admin desactive.')
   }
 
@@ -663,6 +756,19 @@ function App() {
 
     const geometryPointsSnapshot = [...createPoints]
     const geometryCoordinates = toCoordinates(createDraft.geometry, createPoints)
+    const existingLayer = layers.find(
+      (layer) => layer.id === layerId && layer.category === category,
+    )
+    const layerSortOrder =
+      existingLayer !== undefined
+        ? getLayerSortOrderValue(existingLayer)
+        : layers
+            .filter((layer) => layer.category === category)
+            .reduce(
+              (maxOrder, layer, index) =>
+                Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+              -1,
+            ) + 1
     const sortOrder =
       (layers.find((layer) => layer.id === layerId)?.features.length ?? 0) + 1
     const id = `manual_${crypto.randomUUID()}`
@@ -677,6 +783,7 @@ function App() {
       category,
       layer_id: layerId,
       layer_label: layerLabel,
+      layer_sort_order: layerSortOrder,
       color: createDraft.color,
       geometry_type: createDraft.geometry,
       coordinates: geometryCoordinates,
@@ -704,6 +811,7 @@ function App() {
     setEditPoints(geometryPointsSnapshot)
     setIsRedrawingEditGeometry(false)
     await syncSupabaseLayers(layerId)
+    await refreshFeatureVersions(id)
     setAdminMode('edit')
     setIsSaving(false)
     setAdminNotice('Element cree et enregistre.')
@@ -719,6 +827,19 @@ function App() {
     const category = editDraft.category.trim()
     const layerLabel = editDraft.layerLabel.trim()
     const layerId = toLayerId(editDraft.layerId, layerLabel)
+    const targetLayer = layers.find(
+      (layer) => layer.id === layerId && layer.category === category,
+    )
+    const layerSortOrder =
+      targetLayer !== undefined
+        ? getLayerSortOrderValue(targetLayer)
+        : layers
+            .filter((layer) => layer.category === category)
+            .reduce(
+              (maxOrder, layer, index) =>
+                Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+              -1,
+            ) + 1
 
     if (!name || !category || !layerLabel || !layerId) {
       setAdminNotice('Nom, categorie et calque sont obligatoires.')
@@ -746,6 +867,7 @@ function App() {
         category,
         layer_id: layerId,
         layer_label: layerLabel,
+        layer_sort_order: layerSortOrder,
         color: editDraft.color,
         geometry_type: editDraft.geometry,
         coordinates: toCoordinates(editDraft.geometry, editPoints),
@@ -760,18 +882,19 @@ function App() {
 
     await syncSupabaseLayers(layerId)
     setSelectedFeatureId(selectedFeatureId)
+    await refreshFeatureVersions(selectedFeatureId)
     setIsSaving(false)
     setAdminNotice('Element modifie.')
   }
 
   const handleDeleteFeature = async () => {
-    if (!supabase || !isAdmin || !selectedFeatureId || !selectedFeature) {
+    if (!isAdmin || !selectedFeatureId || !selectedFeature) {
       setAdminNotice('Selectionne un element a supprimer.')
       return
     }
 
     const confirmed = window.confirm(
-      `Supprimer "${selectedFeature.feature.name}" ? Cette action est irreversible.`,
+      `Deplacer "${selectedFeature.feature.name}" dans la corbeille ?`,
     )
     if (!confirmed) {
       return
@@ -780,14 +903,10 @@ function App() {
     setIsSaving(true)
     setAdminNotice(null)
 
-    const { error } = await supabase
-      .from('map_features')
-      .delete()
-      .eq('id', selectedFeatureId)
-
-    if (error) {
+    const result = await moveFeatureToTrash(selectedFeatureId)
+    if (!result.ok) {
       setIsSaving(false)
-      setAdminNotice(`Erreur suppression: ${error.message}`)
+      setAdminNotice(`Erreur suppression: ${result.error}`)
       return
     }
 
@@ -795,9 +914,114 @@ function App() {
     setEditDraft(null)
     setEditPoints([])
     setIsRedrawingEditGeometry(false)
+    setVersionItems([])
+    await syncSupabaseLayers()
+    await refreshTrash()
+    setIsSaving(false)
+    setAdminNotice('Element deplace dans la corbeille.')
+  }
+
+  const handleRestoreFromTrash = async (featureId: string) => {
+    if (!isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+
+    setIsSaving(true)
+    setAdminNotice(null)
+
+    const result = await restoreFeatureFromTrash(featureId)
+    if (!result.ok) {
+      setIsSaving(false)
+      setAdminNotice(`Erreur restauration: ${result.error}`)
+      return
+    }
+
+    await syncSupabaseLayers()
+    await refreshTrash()
+    setSelectedFeatureId(featureId)
+    await refreshFeatureVersions(featureId)
+    setIsSaving(false)
+    setAdminMode('edit')
+    setAdminNotice('Element restaure depuis la corbeille.')
+  }
+
+  const handleUndoFeatureVersion = async () => {
+    if (!isAdmin || !selectedFeatureId) {
+      setAdminNotice('Selectionne un element pour restaurer une version.')
+      return
+    }
+
+    setIsSaving(true)
+    setAdminNotice(null)
+
+    const result = await restorePreviousFeatureVersion(selectedFeatureId)
+    if (!result.ok) {
+      setIsSaving(false)
+      setAdminNotice(`Undo impossible: ${result.error}`)
+      return
+    }
+
+    await syncSupabaseLayers()
+    await refreshTrash()
+    await refreshFeatureVersions(selectedFeatureId)
+    setIsSaving(false)
+    setAdminNotice('Version precedente restauree.')
+  }
+
+  const handleMoveLayer = async (
+    category: string,
+    layerId: string,
+    direction: 'up' | 'down',
+  ) => {
+    if (!isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+
+    const categoryLayers = layers
+      .filter((layer) => layer.category === category)
+      .sort((left, right) => {
+        const leftSort = getLayerSortOrderValue(left)
+        const rightSort = getLayerSortOrderValue(right)
+        if (leftSort !== rightSort) {
+          return leftSort - rightSort
+        }
+        return left.label.localeCompare(right.label, 'fr')
+      })
+
+    const currentIndex = categoryLayers.findIndex((layer) => layer.id === layerId)
+    if (currentIndex === -1) {
+      return
+    }
+
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= categoryLayers.length) {
+      return
+    }
+
+    const currentLayer = categoryLayers[currentIndex]
+    const targetLayer = categoryLayers[targetIndex]
+    const currentSort = getLayerSortOrderValue(currentLayer, currentIndex)
+    const targetSort = getLayerSortOrderValue(targetLayer, targetIndex)
+
+    setIsSaving(true)
+    setAdminNotice(null)
+
+    const result = await persistLayerSortOrder([
+      { category, layerId: currentLayer.id, sortOrder: targetSort },
+      { category, layerId: targetLayer.id, sortOrder: currentSort },
+    ])
+
+    if (!result.ok) {
+      setIsSaving(false)
+      setAdminNotice(`Erreur ordre manuel: ${result.error}`)
+      return
+    }
+
     await syncSupabaseLayers()
     setIsSaving(false)
-    setAdminNotice('Element supprime.')
+    setAdminNotice('Ordre du calque mis a jour.')
   }
 
   const setCreateLayerTemplate = (layerId: string) => {
@@ -1517,14 +1741,45 @@ function App() {
                           </button>
                         </div>
 
-                        <button
-                          type="button"
-                          className="solid-button"
-                          disabled={isSaving}
-                          onClick={handleSaveEdition}
-                        >
-                          {isSaving ? 'Sauvegarde...' : 'Enregistrer'}
-                        </button>
+                        <div className="admin-actions-row">
+                          <button
+                            type="button"
+                            className="solid-button"
+                            disabled={isSaving}
+                            onClick={handleSaveEdition}
+                          >
+                            {isSaving ? 'Sauvegarde...' : 'Enregistrer'}
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={isSaving}
+                            onClick={handleUndoFeatureVersion}
+                          >
+                            Restaurer version precedente
+                          </button>
+                        </div>
+
+                        <div className="versions-block">
+                          <h4>Historique ({versionItems.length})</h4>
+                          {isVersionsLoading ? (
+                            <p className="muted">Chargement des versions...</p>
+                          ) : versionItems.length === 0 ? (
+                            <p className="muted">Aucune version disponible.</p>
+                          ) : (
+                            <ul className="versions-list">
+                              {versionItems.map((version) => (
+                                <li key={version.versionId}>
+                                  <strong>
+                                    {VERSION_OPERATION_LABELS[version.operation] ??
+                                      version.operation}
+                                  </strong>
+                                  <span>{new Date(version.createdAt).toLocaleString('fr-FR')}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>
@@ -1554,6 +1809,37 @@ function App() {
                     )}
                   </div>
                 ) : null}
+
+                <div className="editor-block">
+                  <h3>Corbeille ({trashItems.length})</h3>
+                  {isTrashLoading ? (
+                    <p className="muted">Chargement de la corbeille...</p>
+                  ) : trashItems.length === 0 ? (
+                    <p className="muted">Corbeille vide.</p>
+                  ) : (
+                    <ul className="trash-list">
+                      {trashItems.map((item) => (
+                        <li key={item.id}>
+                          <div>
+                            <strong>{item.name}</strong>
+                            <p>
+                              {item.layerLabel} | {STATUS_LABELS[item.status]} |{' '}
+                              {new Date(item.deletedAt).toLocaleString('fr-FR')}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost-button mini-button"
+                            onClick={() => void handleRestoreFromTrash(item.id)}
+                            disabled={isSaving}
+                          >
+                            Restaurer
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1620,15 +1906,41 @@ function App() {
           {layersByCategory.map((block) => (
             <div key={block.category} className="layer-group">
               <h3>{block.category}</h3>
-              {block.layers.map((layer) => (
-                <label key={layer.id} className="control-row">
-                  <input
-                    type="checkbox"
-                    checked={activeLayers[layer.id]}
-                    onChange={() => toggleLayer(layer.id)}
-                  />
-                  <span>{layer.label}</span>
-                </label>
+              {block.layers.map((layer, index) => (
+                <div key={layer.id} className="layer-row">
+                  <label className="control-row">
+                    <input
+                      type="checkbox"
+                      checked={activeLayers[layer.id]}
+                      onChange={() => toggleLayer(layer.id)}
+                    />
+                    <span>{layer.label}</span>
+                  </label>
+                  {isAdmin ? (
+                    <div className="layer-order-actions">
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() => void handleMoveLayer(block.category, layer.id, 'up')}
+                        disabled={isSaving || index === 0}
+                        title="Monter"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() =>
+                          void handleMoveLayer(block.category, layer.id, 'down')
+                        }
+                        disabled={isSaving || index === block.layers.length - 1}
+                        title="Descendre"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ))}
             </div>
           ))}

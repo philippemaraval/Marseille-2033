@@ -28,5 +28,6 @@ export interface LayerConfig {
   id: string
   label: string
   category: string
+  sortOrder?: number
   features: GeometryFeature[]
 }

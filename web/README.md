@@ -28,6 +28,8 @@ Variables utiles:
 ## Supabase
 
 1. Executer le schema SQL: `supabase/schema.sql`
+   - Si la base existe deja: re-executer aussi le script pour ajouter les colonnes
+     `deleted_at`, `deleted_by`, `layer_sort_order` et les triggers de versioning.
 2. Configurer `.env` (voir `.env.example`)
 3. Charger l'import OSM en base:
 
@@ -58,7 +60,9 @@ Fonctionnement:
 - Session persistante cote navigateur (reconnexion automatique).
 - `Creation`: clic sur la carte pour poser un point, une ligne ou un polygone.
 - `Edition`: clic sur un element visible pour modifier metadonnees/couleur/geometrie.
-- `Suppression`: clic sur un element puis confirmation.
+- `Suppression`: envoi dans la corbeille (soft delete), restauration possible.
+- `Versioning`: historique des versions par element + restauration de la version precedente.
+- `Ordre manuel`: fleches haut/bas sur les calques (ordre par categorie, persiste en base).
 
 Toutes les modifications sont ecrites dans `map_features` puis rechargees immediatement.
 

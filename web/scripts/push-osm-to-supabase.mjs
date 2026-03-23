@@ -30,8 +30,21 @@ function chunkArray(items, size) {
 
 function flattenLayers(payload) {
   const rows = []
+  const layerOrderByCategory = new Map()
 
   for (const layer of payload.layers || []) {
+    const category = String(layer.category)
+    const layerId = String(layer.id)
+
+    if (!layerOrderByCategory.has(category)) {
+      layerOrderByCategory.set(category, new Map())
+    }
+    const categoryMap = layerOrderByCategory.get(category)
+    if (!categoryMap.has(layerId)) {
+      categoryMap.set(layerId, categoryMap.size)
+    }
+    const layerSortOrder = categoryMap.get(layerId)
+
     const features = Array.isArray(layer.features) ? layer.features : []
     for (let index = 0; index < features.length; index += 1) {
       const feature = features[index]
@@ -43,9 +56,10 @@ function flattenLayers(payload) {
         id: String(feature.id),
         name: String(feature.name || feature.id),
         status: String(feature.status || 'existant'),
-        category: String(layer.category),
-        layer_id: String(layer.id),
+        category,
+        layer_id: layerId,
         layer_label: String(layer.label),
+        layer_sort_order: layerSortOrder,
         color: String(feature.color || '#1d4ed8'),
         geometry_type: geometryType,
         coordinates,

@@ -16,6 +16,7 @@ interface MapFeatureRow {
   geometry_type: string
   coordinates: unknown
   sort_order: number | null
+  layer_sort_order: number | null
 }
 
 const STATUS_DEFAULT_COLOR: Record<StatusId, string> = {
@@ -118,9 +119,11 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
     const { data, error } = await supabase
       .from('map_features')
       .select(
-        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order',
+        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order,layer_sort_order',
       )
+      .is('deleted_at', null)
       .order('category')
+      .order('layer_sort_order')
       .order('layer_label')
       .order('sort_order')
       .order('name')
@@ -154,9 +157,20 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
         id: row.layer_id,
         label: row.layer_label,
         category: row.category,
+        sortOrder: row.layer_sort_order ?? 0,
         features: [feature],
       })
       continue
+    }
+
+    if (
+      typeof row.layer_sort_order === 'number' &&
+      Number.isFinite(row.layer_sort_order)
+    ) {
+      existingLayer.sortOrder = Math.min(
+        existingLayer.sortOrder ?? row.layer_sort_order,
+        row.layer_sort_order,
+      )
     }
 
     existingLayer.features.push(feature)
@@ -166,6 +180,11 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
     const byCategory = a.category.localeCompare(b.category, 'fr')
     if (byCategory !== 0) {
       return byCategory
+    }
+    const leftSort = a.sortOrder ?? Number.MAX_SAFE_INTEGER
+    const rightSort = b.sortOrder ?? Number.MAX_SAFE_INTEGER
+    if (leftSort !== rightSort) {
+      return leftSort - rightSort
     }
     return a.label.localeCompare(b.label, 'fr')
   })
