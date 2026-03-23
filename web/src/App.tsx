@@ -1270,7 +1270,7 @@ function App() {
       void handleCreateFeature()
       return
     }
-    if (adminMode === 'edit' && isRedrawingEditGeometry) {
+    if (adminMode === 'edit' && selectedFeatureId && editDraft) {
       void handleSaveEdition()
       return
     }
@@ -1668,6 +1668,16 @@ function App() {
           handleToolbarPrimaryAction()
           return
         }
+        if (
+          adminMode === 'edit' &&
+          !isRedrawingEditGeometry &&
+          selectedFeatureId &&
+          editDraft
+        ) {
+          event.preventDefault()
+          handleToolbarPrimaryAction()
+          return
+        }
         if (adminMode === 'delete' && selectedFeatureId) {
           event.preventDefault()
           handleToolbarPrimaryAction()
@@ -1771,6 +1781,53 @@ function App() {
             color: createDraft.color,
             weight: 4,
             dashArray: '7 7',
+          }}
+        />
+      )
+    }
+
+    if (
+      adminMode === 'edit' &&
+      editDraft &&
+      editPoints.length > 0 &&
+      !isRedrawingEditGeometry
+    ) {
+      if (editDraft.geometry === 'point') {
+        return (
+          <CircleMarker
+            center={editPoints[0]}
+            radius={9}
+            pathOptions={{
+              color: '#111827',
+              fillColor: editDraft.color,
+              fillOpacity: 0.95,
+              weight: 3,
+            }}
+          />
+        )
+      }
+
+      if (editDraft.geometry === 'line') {
+        return (
+          <Polyline
+            positions={editPoints}
+            pathOptions={{
+              color: editDraft.color,
+              weight: 5,
+              opacity: 0.95,
+            }}
+          />
+        )
+      }
+
+      return (
+        <Polygon
+          positions={editPoints}
+          pathOptions={{
+            color: editDraft.color,
+            weight: 4,
+            fillColor: editDraft.color,
+            fillOpacity: 0.24,
           }}
         />
       )
@@ -1886,6 +1943,15 @@ function App() {
       )
       .map((feature) => {
         const isSelected = selectedFeatureId === feature.id
+        const isHiddenSelectedGeometry =
+          isSelected &&
+          adminMode === 'edit' &&
+          editDraft !== null &&
+          editPoints.length > 0
+
+        if (isHiddenSelectedGeometry) {
+          return null
+        }
 
         const popup = (
           <Popup>
@@ -1996,8 +2062,10 @@ function App() {
   const toolbarCanConfirm =
     adminMode === 'create'
       ? isGeometryComplete(createDraft.geometry, createPoints)
-      : adminMode === 'edit' && isRedrawingEditGeometry && editDraft
-        ? isGeometryComplete(editDraft.geometry, editPoints)
+      : adminMode === 'edit' && editDraft
+        ? isRedrawingEditGeometry
+          ? isGeometryComplete(editDraft.geometry, editPoints)
+          : Boolean(selectedFeatureId)
         : adminMode === 'delete'
           ? Boolean(selectedFeatureId)
           : false
@@ -3052,27 +3120,25 @@ function App() {
                         {isRedrawingEditGeometry ? 'Arreter redessin' : 'Redessiner'}
                       </button>
                       {isRedrawingEditGeometry ? (
-                        <>
-                          <button
-                            type="button"
-                            className="ghost-button mini-button"
-                            onClick={handleToolbarUndoLastPoint}
-                            disabled={!toolbarCanUndo}
-                            title="Annuler dernier point (Retour)"
-                          >
-                            Annuler point
-                          </button>
-                          <button
-                            type="button"
-                            className="solid-button mini-button"
-                            onClick={handleToolbarPrimaryAction}
-                            disabled={!toolbarCanConfirm || isSaving}
-                            title="Enregistrer (Entrer)"
-                          >
-                            {isSaving ? '...' : 'Enregistrer'}
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          className="ghost-button mini-button"
+                          onClick={handleToolbarUndoLastPoint}
+                          disabled={!toolbarCanUndo}
+                          title="Annuler dernier point (Retour)"
+                        >
+                          Annuler point
+                        </button>
                       ) : null}
+                      <button
+                        type="button"
+                        className="solid-button mini-button"
+                        onClick={handleToolbarPrimaryAction}
+                        disabled={!toolbarCanConfirm || isSaving}
+                        title="Enregistrer (Entrer)"
+                      >
+                        {isSaving ? '...' : 'Enregistrer'}
+                      </button>
                     </div>
                     {!isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">

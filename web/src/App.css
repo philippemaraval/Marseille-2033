@@ -617,6 +617,7 @@
 .vertex-handle-marker {
   background: transparent;
   border: 0;
+  cursor: grab;
 }
 
 .point-handle-marker span,
