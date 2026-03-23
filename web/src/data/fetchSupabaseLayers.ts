@@ -1,4 +1,9 @@
-import type { GeometryFeature, LayerConfig, StatusId } from '../types/map'
+import type {
+  FeatureStyle,
+  GeometryFeature,
+  LayerConfig,
+  StatusId,
+} from '../types/map'
 import { hasSupabase, supabase } from '../lib/supabase'
 
 type FetchResult =
@@ -13,6 +18,7 @@ interface MapFeatureRow {
   layer_id: string
   layer_label: string
   color: string | null
+  style: unknown | null
   geometry_type: string
   coordinates: unknown
   sort_order: number | null
@@ -51,12 +57,38 @@ function isLatLngArray(value: unknown): value is [number, number][] {
   return value.every((entry) => isLatLng(entry))
 }
 
+function normalizeStyle(raw: unknown): FeatureStyle | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+  const source = raw as Record<string, unknown>
+  const result: FeatureStyle = {}
+  if (typeof source.pointRadius === 'number' && Number.isFinite(source.pointRadius)) {
+    result.pointRadius = source.pointRadius
+  }
+  if (typeof source.lineWidth === 'number' && Number.isFinite(source.lineWidth)) {
+    result.lineWidth = source.lineWidth
+  }
+  if (typeof source.fillOpacity === 'number' && Number.isFinite(source.fillOpacity)) {
+    result.fillOpacity = source.fillOpacity
+  }
+  if (
+    result.pointRadius === undefined &&
+    result.lineWidth === undefined &&
+    result.fillOpacity === undefined
+  ) {
+    return undefined
+  }
+  return result
+}
+
 function toFeature(row: MapFeatureRow): GeometryFeature | null {
   const status = asStatus(row.status)
   if (!status) {
     return null
   }
   const color = row.color || STATUS_DEFAULT_COLOR[status]
+  const style = normalizeStyle(row.style)
 
   if (row.geometry_type === 'point') {
     if (!isLatLng(row.coordinates)) {
@@ -67,6 +99,7 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
       name: row.name,
       status,
       color,
+      style,
       geometry: 'point',
       position: row.coordinates,
     }
@@ -81,6 +114,7 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
       name: row.name,
       status,
       color,
+      style,
       geometry: 'line',
       positions: row.coordinates,
     }
@@ -95,6 +129,7 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
       name: row.name,
       status,
       color,
+      style,
       geometry: 'polygon',
       positions: row.coordinates,
     }
@@ -129,7 +164,7 @@ async function fetchRowsWithCurrentSchema(): Promise<{
     const { data, error } = await supabase
       .from('map_features')
       .select(
-        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order,layer_sort_order',
+        'id,name,status,category,layer_id,layer_label,color,style,geometry_type,coordinates,sort_order,layer_sort_order',
       )
       .is('deleted_at', null)
       .order('category')
@@ -144,6 +179,55 @@ async function fetchRowsWithCurrentSchema(): Promise<{
     }
 
     const pageRows = (data || []) as MapFeatureRow[]
+    rows.push(...pageRows)
+
+    if (pageRows.length < pageSize) {
+      break
+    }
+
+    offset += pageSize
+  }
+
+  return { ok: true, rows }
+}
+
+async function fetchRowsWithCurrentSchemaWithoutStyle(): Promise<{
+  ok: true
+  rows: MapFeatureRow[]
+} | {
+  ok: false
+  error: string
+}> {
+  if (!supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const pageSize = 1000
+  let offset = 0
+  const rows: MapFeatureRow[] = []
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from('map_features')
+      .select(
+        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order,layer_sort_order',
+      )
+      .is('deleted_at', null)
+      .order('category')
+      .order('layer_sort_order')
+      .order('layer_label')
+      .order('sort_order')
+      .order('name')
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      return { ok: false, error: error.message }
+    }
+
+    const pageRows = (data || []).map((row) => ({
+      ...row,
+      style: null,
+    })) as MapFeatureRow[]
     rows.push(...pageRows)
 
     if (pageRows.length < pageSize) {
@@ -189,6 +273,7 @@ async function fetchRowsWithLegacySchema(): Promise<{
 
     const pageRows = (data || []).map((row) => ({
       ...row,
+      style: null,
       layer_sort_order: 0,
     })) as MapFeatureRow[]
 
@@ -218,11 +303,16 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
   if (currentSchemaResult.ok) {
     rows = currentSchemaResult.rows
   } else if (isMissingSchemaError(currentSchemaResult.error)) {
-    const legacySchemaResult = await fetchRowsWithLegacySchema()
-    if (!legacySchemaResult.ok) {
-      return { ok: false, error: legacySchemaResult.error }
+    const withoutStyleResult = await fetchRowsWithCurrentSchemaWithoutStyle()
+    if (withoutStyleResult.ok) {
+      rows = withoutStyleResult.rows
+    } else {
+      const legacySchemaResult = await fetchRowsWithLegacySchema()
+      if (!legacySchemaResult.ok) {
+        return { ok: false, error: legacySchemaResult.error }
+      }
+      rows = legacySchemaResult.rows
     }
-    rows = legacySchemaResult.rows
   } else {
     return { ok: false, error: currentSchemaResult.error }
   }

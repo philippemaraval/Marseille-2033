@@ -48,7 +48,12 @@ import {
 import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
 import { layerMeta, layers as fallbackLayers } from './data/layers'
 import { hasSupabase, supabase } from './lib/supabase'
-import type { GeometryFeature, LayerConfig, StatusId } from './types/map'
+import type {
+  FeatureStyle,
+  GeometryFeature,
+  LayerConfig,
+  StatusId,
+} from './types/map'
 import './App.css'
 
 type BaseMapId = 'osm' | 'satellite' | 'carto_light' | 'carto_dark' | 'topo'
@@ -87,6 +92,9 @@ interface CreateDraft {
   layerId: string
   layerLabel: string
   geometry: DrawGeometry
+  pointRadius: number
+  lineWidth: number
+  fillOpacity: number
 }
 
 interface EditDraft {
@@ -97,6 +105,9 @@ interface EditDraft {
   layerId: string
   layerLabel: string
   geometry: DrawGeometry
+  pointRadius: number
+  lineWidth: number
+  fillOpacity: number
 }
 
 interface ImportDraft {
@@ -249,6 +260,10 @@ const MEASURE_GEOMETRY_LABELS: Record<MeasureGeometry, string> = {
   polygon: 'Surface',
 }
 
+const DEFAULT_POINT_RADIUS = 6
+const DEFAULT_LINE_WIDTH = 3
+const DEFAULT_POLYGON_FILL_OPACITY = 0.2
+
 const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
   id: string
   label: string
@@ -354,6 +369,15 @@ function decodeSupabaseAnonKey(value: string | undefined): SupabaseKeyMetadata {
       error: 'Impossible de decoder la cle',
     }
   }
+}
+
+function isMissingStyleColumnError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('column') &&
+    normalized.includes('style') &&
+    normalized.includes('does not exist')
+  )
 }
 
 function fingerprintToken(value: string | undefined): string {
@@ -490,6 +514,78 @@ function isHexColor(value: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(value)
 }
 
+function normalizePointRadius(value: number): number {
+  return Math.max(3, Math.min(24, value))
+}
+
+function normalizeLineWidth(value: number): number {
+  return Math.max(1, Math.min(14, value))
+}
+
+function normalizeFillOpacity(value: number): number {
+  return Math.max(0.05, Math.min(0.95, value))
+}
+
+function resolveDraftStyle(
+  geometry: DrawGeometry,
+  style?: FeatureStyle,
+): Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'> {
+  const pointRadius =
+    typeof style?.pointRadius === 'number' && Number.isFinite(style.pointRadius)
+      ? style.pointRadius
+      : DEFAULT_POINT_RADIUS
+  const lineWidth =
+    typeof style?.lineWidth === 'number' && Number.isFinite(style.lineWidth)
+      ? style.lineWidth
+      : DEFAULT_LINE_WIDTH
+  const fillOpacity =
+    typeof style?.fillOpacity === 'number' && Number.isFinite(style.fillOpacity)
+      ? style.fillOpacity
+      : DEFAULT_POLYGON_FILL_OPACITY
+
+  if (geometry === 'point') {
+    return {
+      pointRadius: normalizePointRadius(pointRadius),
+      lineWidth: normalizeLineWidth(2),
+      fillOpacity: normalizeFillOpacity(DEFAULT_POLYGON_FILL_OPACITY),
+    }
+  }
+
+  if (geometry === 'line') {
+    return {
+      pointRadius: normalizePointRadius(DEFAULT_POINT_RADIUS),
+      lineWidth: normalizeLineWidth(lineWidth),
+      fillOpacity: normalizeFillOpacity(DEFAULT_POLYGON_FILL_OPACITY),
+    }
+  }
+
+  return {
+    pointRadius: normalizePointRadius(DEFAULT_POINT_RADIUS),
+    lineWidth: normalizeLineWidth(lineWidth),
+    fillOpacity: normalizeFillOpacity(fillOpacity),
+  }
+}
+
+function toFeatureStylePayload(
+  geometry: DrawGeometry,
+  draft: Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'>,
+): FeatureStyle {
+  if (geometry === 'point') {
+    return {
+      pointRadius: normalizePointRadius(draft.pointRadius),
+    }
+  }
+  if (geometry === 'line') {
+    return {
+      lineWidth: normalizeLineWidth(draft.lineWidth),
+    }
+  }
+  return {
+    lineWidth: normalizeLineWidth(draft.lineWidth),
+    fillOpacity: normalizeFillOpacity(draft.fillOpacity),
+  }
+}
+
 function toLayerId(value: string, layerLabel: string): string {
   const base = (value.trim() || layerLabel.trim()).toLowerCase()
   return base
@@ -510,6 +606,9 @@ function buildDefaultDraft(layerList: LayerConfig[]): CreateDraft {
     layerId: firstLayer?.id ?? 'nouveau-calque',
     layerLabel: firstLayer?.label ?? 'Nouveau calque',
     geometry: 'point',
+    pointRadius: DEFAULT_POINT_RADIUS,
+    lineWidth: DEFAULT_LINE_WIDTH,
+    fillOpacity: DEFAULT_POLYGON_FILL_OPACITY,
   }
 }
 
@@ -836,9 +935,6 @@ function App() {
     useState<VisibleFeatureSortMode>('alpha')
   const [isLabelOverlayEnabled, setIsLabelOverlayEnabled] = useState(false)
   const [labelMinZoom, setLabelMinZoom] = useState(14)
-  const [pointSizeScale, setPointSizeScale] = useState(1)
-  const [lineWidthScale, setLineWidthScale] = useState(1)
-  const [polygonOpacityScale, setPolygonOpacityScale] = useState(1)
 
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [showDebugInfo, setShowDebugInfo] = useState(false)
@@ -1529,6 +1625,7 @@ function App() {
           current.includes(featureId) ? current : [...current, featureId],
         )
       }
+      const styleDraft = resolveDraftStyle(match.feature.geometry, match.feature.style)
       setEditDraft({
         name: match.feature.name,
         status: match.feature.status,
@@ -1537,6 +1634,9 @@ function App() {
         layerId: match.layerId,
         layerLabel: match.layerLabel,
         geometry: match.feature.geometry,
+        pointRadius: styleDraft.pointRadius,
+        lineWidth: styleDraft.lineWidth,
+        fillOpacity: styleDraft.fillOpacity,
       })
       setEditPoints(getFeaturePoints(match.feature))
       setIsRedrawingEditGeometry(false)
@@ -1885,6 +1985,11 @@ function App() {
         setCreateDraft((current) => ({
           ...current,
           geometry,
+          ...resolveDraftStyle(geometry, {
+            pointRadius: current.pointRadius,
+            lineWidth: current.lineWidth,
+            fillOpacity: current.fillOpacity,
+          }),
         }))
         setCreatePoints([])
         setIsRedrawingEditGeometry(false)
@@ -2008,6 +2113,7 @@ function App() {
 
     const geometryPointsSnapshot = [...createPoints]
     const geometryCoordinates = toCoordinates(createDraft.geometry, createPoints)
+    const stylePayload = toFeatureStylePayload(createDraft.geometry, createDraft)
     const existingLayer = layers.find(
       (layer) => layer.id === layerId && layer.category === category,
     )
@@ -2028,7 +2134,7 @@ function App() {
     setIsSaving(true)
     setAdminNotice(null)
 
-    const { error } = await supabase.from('map_features').insert({
+    const insertPayload = {
       id,
       name: finalName,
       status: createDraft.status,
@@ -2037,11 +2143,20 @@ function App() {
       layer_label: layerLabel,
       layer_sort_order: layerSortOrder,
       color: createDraft.color,
+      style: stylePayload,
       geometry_type: createDraft.geometry,
       coordinates: geometryCoordinates,
       sort_order: sortOrder,
       source: 'manual',
-    })
+    }
+    let didFallbackWithoutStyle = false
+    let { error } = await supabase.from('map_features').insert(insertPayload)
+    if (error && isMissingStyleColumnError(error.message)) {
+      const legacyPayload = { ...insertPayload, style: undefined }
+      const retry = await supabase.from('map_features').insert(legacyPayload)
+      error = retry.error
+      didFallbackWithoutStyle = !error
+    }
 
     if (error) {
       setIsSaving(false)
@@ -2060,6 +2175,9 @@ function App() {
       layerId,
       layerLabel,
       geometry: createDraft.geometry,
+      pointRadius: createDraft.pointRadius,
+      lineWidth: createDraft.lineWidth,
+      fillOpacity: createDraft.fillOpacity,
     })
     setEditPoints(geometryPointsSnapshot)
     setIsRedrawingEditGeometry(false)
@@ -2067,7 +2185,11 @@ function App() {
     await refreshFeatureVersions(id)
     setAdminMode('edit')
     setIsSaving(false)
-    setAdminNotice('Element cree et enregistre.')
+    setAdminNotice(
+      didFallbackWithoutStyle
+        ? 'Element cree. Applique web/supabase/schema.sql pour persister les styles individuels.'
+        : 'Element cree et enregistre.',
+    )
   }, [
     createDraft,
     createPoints,
@@ -2115,24 +2237,37 @@ function App() {
       setAdminNotice('Geometrie incomplete: ajoute plus de points sur la carte.')
       return
     }
+    const stylePayload = toFeatureStylePayload(editDraft.geometry, editDraft)
 
     setIsSaving(true)
     setAdminNotice(null)
 
-    const { error } = await supabase
+    const updatePayload = {
+      name,
+      status: editDraft.status,
+      category,
+      layer_id: layerId,
+      layer_label: layerLabel,
+      layer_sort_order: layerSortOrder,
+      color: editDraft.color,
+      style: stylePayload,
+      geometry_type: editDraft.geometry,
+      coordinates: toCoordinates(editDraft.geometry, editPoints),
+    }
+    let didFallbackWithoutStyle = false
+    let { error } = await supabase
       .from('map_features')
-      .update({
-        name,
-        status: editDraft.status,
-        category,
-        layer_id: layerId,
-        layer_label: layerLabel,
-        layer_sort_order: layerSortOrder,
-        color: editDraft.color,
-        geometry_type: editDraft.geometry,
-        coordinates: toCoordinates(editDraft.geometry, editPoints),
-      })
+      .update(updatePayload)
       .eq('id', selectedFeatureId)
+    if (error && isMissingStyleColumnError(error.message)) {
+      const legacyPayload = { ...updatePayload, style: undefined }
+      const retry = await supabase
+        .from('map_features')
+        .update(legacyPayload)
+        .eq('id', selectedFeatureId)
+      error = retry.error
+      didFallbackWithoutStyle = !error
+    }
 
     if (error) {
       setIsSaving(false)
@@ -2145,7 +2280,11 @@ function App() {
     setSelectedFeatureIds([selectedFeatureId])
     await refreshFeatureVersions(selectedFeatureId)
     setIsSaving(false)
-    setAdminNotice('Element modifie.')
+    setAdminNotice(
+      didFallbackWithoutStyle
+        ? 'Element modifie. Applique web/supabase/schema.sql pour persister les styles individuels.'
+        : 'Element modifie.',
+    )
   }, [
     editDraft,
     editPoints,
@@ -2299,6 +2438,7 @@ function App() {
         layer_label: ref.layerLabel,
         layer_sort_order: layerSortOrder,
         color: ref.feature.color,
+        style: ref.feature.style ?? null,
         geometry_type: ref.feature.geometry,
         coordinates: offsetFeatureCoordinates(ref.feature.geometry, points, offset),
         sort_order: nextCount,
@@ -2308,7 +2448,17 @@ function App() {
 
     setIsSaving(true)
     setAdminNotice(null)
-    const { error } = await supabase.from('map_features').insert(rows)
+    let didFallbackWithoutStyle = false
+    let { error } = await supabase.from('map_features').insert(rows)
+    if (error && isMissingStyleColumnError(error.message)) {
+      const legacyRows = rows.map((row) => ({
+        ...row,
+        style: undefined,
+      }))
+      const retry = await supabase.from('map_features').insert(legacyRows)
+      error = retry.error
+      didFallbackWithoutStyle = !error
+    }
     if (error) {
       setIsSaving(false)
       setAdminNotice(`Erreur duplication: ${error.message}`)
@@ -2326,8 +2476,12 @@ function App() {
     setIsSaving(false)
     setAdminNotice(
       duplicatedIds.length > 1
-        ? `${duplicatedIds.length} elements dupliques.`
-        : 'Element duplique.',
+        ? didFallbackWithoutStyle
+          ? `${duplicatedIds.length} elements dupliques (styles non persistes: applique web/supabase/schema.sql).`
+          : `${duplicatedIds.length} elements dupliques.`
+        : didFallbackWithoutStyle
+          ? 'Element duplique (style non persiste: applique web/supabase/schema.sql).'
+          : 'Element duplique.',
     )
   }, [
     featureById,
@@ -2430,6 +2584,45 @@ function App() {
     setAdminNotice(next ? 'Snapping actif.' : 'Snapping desactive.')
     setSnapPreview(null)
   }, [isSnappingEnabled])
+
+  const applyStyleToCurrentDraft = useCallback(
+    (changes: Partial<Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'>>) => {
+      const normalized: Partial<
+        Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'>
+      > = {}
+      if (typeof changes.pointRadius === 'number' && Number.isFinite(changes.pointRadius)) {
+        normalized.pointRadius = normalizePointRadius(changes.pointRadius)
+      }
+      if (typeof changes.lineWidth === 'number' && Number.isFinite(changes.lineWidth)) {
+        normalized.lineWidth = normalizeLineWidth(changes.lineWidth)
+      }
+      if (typeof changes.fillOpacity === 'number' && Number.isFinite(changes.fillOpacity)) {
+        normalized.fillOpacity = normalizeFillOpacity(changes.fillOpacity)
+      }
+      if (Object.keys(normalized).length === 0) {
+        return
+      }
+
+      if (adminMode === 'create') {
+        setCreateDraft((current) => ({
+          ...current,
+          ...normalized,
+        }))
+        return
+      }
+      if (adminMode === 'edit') {
+        setEditDraft((current) =>
+          current
+            ? {
+                ...current,
+                ...normalized,
+              }
+            : current,
+        )
+      }
+    },
+    [adminMode],
+  )
 
   const handleClearLocalHistory = useCallback(() => {
     setLocalHistoryPast([])
@@ -3001,6 +3194,11 @@ function App() {
           layerLabel,
           layerSortOrder,
           color: item.color ?? importDraft.defaultColor,
+          style: toFeatureStylePayload(item.geometry, {
+            pointRadius: DEFAULT_POINT_RADIUS,
+            lineWidth: DEFAULT_LINE_WIDTH,
+            fillOpacity: DEFAULT_POLYGON_FILL_OPACITY,
+          }),
           geometryType: item.geometry,
           coordinates,
           sortOrder: existingFeatureCount + index + 1,
@@ -3318,7 +3516,7 @@ function App() {
         return (
           <CircleMarker
             center={createPoints[0]}
-            radius={8}
+            radius={normalizePointRadius(createDraft.pointRadius)}
             pathOptions={{
               color: '#111827',
               fillColor: createDraft.color,
@@ -3335,7 +3533,7 @@ function App() {
             positions={createPoints}
             pathOptions={{
               color: createDraft.color,
-              weight: 4,
+              weight: normalizeLineWidth(createDraft.lineWidth),
               dashArray: '7 7',
             }}
           />
@@ -3348,9 +3546,9 @@ function App() {
             positions={createPoints}
             pathOptions={{
               color: createDraft.color,
-              weight: 3,
+              weight: normalizeLineWidth(createDraft.lineWidth),
               dashArray: '7 7',
-              fillOpacity: 0.15,
+              fillOpacity: normalizeFillOpacity(createDraft.fillOpacity),
             }}
           />
         )
@@ -3361,7 +3559,7 @@ function App() {
           positions={createPoints}
           pathOptions={{
             color: createDraft.color,
-            weight: 4,
+            weight: normalizeLineWidth(createDraft.lineWidth),
             dashArray: '7 7',
           }}
         />
@@ -3378,7 +3576,7 @@ function App() {
         return (
           <CircleMarker
             center={editPoints[0]}
-            radius={9}
+            radius={clamp(normalizePointRadius(editDraft.pointRadius) + 1, 3, 24)}
             pathOptions={{
               color: '#111827',
               fillColor: editDraft.color,
@@ -3395,7 +3593,7 @@ function App() {
             positions={editPoints}
             pathOptions={{
               color: editDraft.color,
-              weight: 5,
+              weight: clamp(normalizeLineWidth(editDraft.lineWidth) + 1, 1, 14),
               opacity: 0.95,
             }}
           />
@@ -3407,9 +3605,9 @@ function App() {
           positions={editPoints}
           pathOptions={{
             color: editDraft.color,
-            weight: 4,
+            weight: clamp(normalizeLineWidth(editDraft.lineWidth) + 1, 1, 14),
             fillColor: editDraft.color,
-            fillOpacity: 0.24,
+            fillOpacity: clamp(normalizeFillOpacity(editDraft.fillOpacity) + 0.08, 0.05, 0.95),
           }}
         />
       )
@@ -3425,7 +3623,7 @@ function App() {
         return (
           <CircleMarker
             center={editPoints[0]}
-            radius={8}
+            radius={normalizePointRadius(editDraft.pointRadius)}
             pathOptions={{
               color: '#111827',
               fillColor: editDraft.color,
@@ -3442,7 +3640,7 @@ function App() {
             positions={editPoints}
             pathOptions={{
               color: editDraft.color,
-              weight: 4,
+              weight: normalizeLineWidth(editDraft.lineWidth),
               dashArray: '7 7',
             }}
           />
@@ -3455,9 +3653,9 @@ function App() {
             positions={editPoints}
             pathOptions={{
               color: editDraft.color,
-              weight: 3,
+              weight: normalizeLineWidth(editDraft.lineWidth),
               dashArray: '7 7',
-              fillOpacity: 0.15,
+              fillOpacity: normalizeFillOpacity(editDraft.fillOpacity),
             }}
           />
         )
@@ -3468,7 +3666,7 @@ function App() {
           positions={editPoints}
           pathOptions={{
             color: editDraft.color,
-            weight: 4,
+            weight: normalizeLineWidth(editDraft.lineWidth),
             dashArray: '7 7',
           }}
         />
@@ -3567,6 +3765,7 @@ function App() {
     layer.features
       .filter((feature) => isFeatureVisibleByFilters(feature))
       .map((feature) => {
+        const styleDraft = resolveDraftStyle(feature.geometry, feature.style)
         const isSelected = selectedFeatureIdSet.has(feature.id)
         const isFocusedSelection = selectedFeatureId === feature.id
         const isHiddenSelectedGeometry =
@@ -3615,13 +3814,17 @@ function App() {
             <CircleMarker
               key={feature.id}
               center={feature.position}
-              radius={clamp((isSelected ? 9 : 6) * pointSizeScale, 4, 20)}
+              radius={clamp(
+                normalizePointRadius(styleDraft.pointRadius) + (isSelected ? 2 : 0),
+                3,
+                24,
+              )}
               eventHandlers={eventHandlers}
               pathOptions={{
                 color: isSelected ? '#0f172a' : feature.color,
                 fillColor: feature.color,
                 fillOpacity: isSelected ? 0.95 : 0.85,
-                weight: clamp((isSelected ? 3 : 2) * lineWidthScale, 1.5, 8),
+                weight: isSelected ? 3 : 2,
               }}
             >
               {popup}
@@ -3637,7 +3840,11 @@ function App() {
               eventHandlers={eventHandlers}
               pathOptions={{
                 color: feature.color,
-                weight: clamp((isSelected ? 5 : 3) * lineWidthScale, 1.5, 10),
+                weight: clamp(
+                  normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1.3 : 0),
+                  1,
+                  14,
+                ),
                 opacity: 0.9,
               }}
             >
@@ -3653,12 +3860,16 @@ function App() {
             eventHandlers={eventHandlers}
             pathOptions={{
               color: feature.color,
-              weight: clamp((isSelected ? 4 : 2) * lineWidthScale, 1.5, 8),
+              weight: clamp(
+                normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1 : 0),
+                1,
+                14,
+              ),
               fillColor: feature.color,
               fillOpacity: clamp(
-                (isSelected ? 0.35 : 0.2) * polygonOpacityScale,
+                normalizeFillOpacity(styleDraft.fillOpacity) + (isSelected ? 0.12 : 0),
                 0.05,
-                0.9,
+                0.95,
               ),
             }}
           >
@@ -3724,6 +3935,14 @@ function App() {
     adminMode === 'create' ? 'Creation en cours' : 'Redessin en cours'
   const canLocalUndo = localHistoryPast.length > 0
   const canLocalRedo = localHistoryFuture.length > 0
+  const activeStyleDraft =
+    adminMode === 'create'
+      ? createDraft
+      : adminMode === 'edit' && editDraft
+        ? editDraft
+        : null
+  const canEditStyleIndividually =
+    activeStyleDraft !== null && (adminMode === 'create' || selectedFeatureId !== null)
   const currentMapZoom = mapViewport?.zoom ?? 0
   const isLabelOverlayActive =
     isLabelOverlayEnabled && currentMapZoom >= labelMinZoom
@@ -4119,9 +4338,15 @@ function App() {
                       <select
                         value={createDraft.geometry}
                         onChange={(event) => {
+                          const nextGeometry = event.target.value as DrawGeometry
                           setCreateDraft((current) => ({
                             ...current,
-                            geometry: event.target.value as DrawGeometry,
+                            geometry: nextGeometry,
+                            ...resolveDraftStyle(nextGeometry, {
+                              pointRadius: current.pointRadius,
+                              lineWidth: current.lineWidth,
+                              fillOpacity: current.fillOpacity,
+                            }),
                           }))
                           setCreatePoints([])
                         }}
@@ -4131,6 +4356,66 @@ function App() {
                         <option value="polygon">Polygone</option>
                       </select>
                     </label>
+
+                    {createDraft.geometry === 'point' ? (
+                      <label>
+                        Taille du point ({Math.round(createDraft.pointRadius)} px)
+                        <input
+                          type="range"
+                          min={3}
+                          max={24}
+                          step={1}
+                          value={createDraft.pointRadius}
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              pointRadius: normalizePointRadius(
+                                Number.parseInt(event.target.value, 10),
+                              ),
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <label>
+                        Epaisseur ({createDraft.lineWidth.toFixed(1)} px)
+                        <input
+                          type="range"
+                          min={1}
+                          max={14}
+                          step={0.5}
+                          value={createDraft.lineWidth}
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              lineWidth: normalizeLineWidth(
+                                Number.parseFloat(event.target.value),
+                              ),
+                            }))
+                          }
+                        />
+                      </label>
+                    )}
+                    {createDraft.geometry === 'polygon' ? (
+                      <label>
+                        Opacite surface ({createDraft.fillOpacity.toFixed(2)})
+                        <input
+                          type="range"
+                          min={0.05}
+                          max={0.95}
+                          step={0.05}
+                          value={createDraft.fillOpacity}
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              fillOpacity: normalizeFillOpacity(
+                                Number.parseFloat(event.target.value),
+                              ),
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : null}
 
                     <label>
                       Utiliser un calque existant
@@ -4352,6 +4637,65 @@ function App() {
                         <p className="muted">
                           Geometrie: {editDraft.geometry} | points: {editPoints.length}
                         </p>
+                        {editDraft.geometry === 'point' ? (
+                          <label>
+                            Taille du point ({Math.round(editDraft.pointRadius)} px)
+                            <input
+                              type="range"
+                              min={3}
+                              max={24}
+                              step={1}
+                              value={editDraft.pointRadius}
+                              onChange={(event) =>
+                                setEditDraft({
+                                  ...editDraft,
+                                  pointRadius: normalizePointRadius(
+                                    Number.parseInt(event.target.value, 10),
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                        ) : (
+                          <label>
+                            Epaisseur ({editDraft.lineWidth.toFixed(1)} px)
+                            <input
+                              type="range"
+                              min={1}
+                              max={14}
+                              step={0.5}
+                              value={editDraft.lineWidth}
+                              onChange={(event) =>
+                                setEditDraft({
+                                  ...editDraft,
+                                  lineWidth: normalizeLineWidth(
+                                    Number.parseFloat(event.target.value),
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                        )}
+                        {editDraft.geometry === 'polygon' ? (
+                          <label>
+                            Opacite surface ({editDraft.fillOpacity.toFixed(2)})
+                            <input
+                              type="range"
+                              min={0.05}
+                              max={0.95}
+                              step={0.05}
+                              value={editDraft.fillOpacity}
+                              onChange={(event) =>
+                                setEditDraft({
+                                  ...editDraft,
+                                  fillOpacity: normalizeFillOpacity(
+                                    Number.parseFloat(event.target.value),
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                        ) : null}
                         {!isRedrawingEditGeometry ? (
                           <p className="muted">
                             Tu peux deplacer les points directement sur la carte par glisser-deposer.
@@ -5122,50 +5466,69 @@ function App() {
               ) : null}
 
               <p className="map-toolbar-meta">
-                <strong>Style global</strong>
+                <strong>Style individuel</strong>
               </p>
-              <label className="map-toolbar-label small">
-                Taille des points: {pointSizeScale.toFixed(2)}x
-                <input
-                  type="range"
-                  min={0.7}
-                  max={2}
-                  step={0.05}
-                  className="map-toolbar-range"
-                  value={pointSizeScale}
-                  onChange={(event) =>
-                    setPointSizeScale(Number.parseFloat(event.target.value))
-                  }
-                />
-              </label>
-              <label className="map-toolbar-label small">
-                Epaisseur lignes: {lineWidthScale.toFixed(2)}x
-                <input
-                  type="range"
-                  min={0.7}
-                  max={2.5}
-                  step={0.05}
-                  className="map-toolbar-range"
-                  value={lineWidthScale}
-                  onChange={(event) =>
-                    setLineWidthScale(Number.parseFloat(event.target.value))
-                  }
-                />
-              </label>
-              <label className="map-toolbar-label small">
-                Opacite surfaces: {polygonOpacityScale.toFixed(2)}x
-                <input
-                  type="range"
-                  min={0.4}
-                  max={2}
-                  step={0.05}
-                  className="map-toolbar-range"
-                  value={polygonOpacityScale}
-                  onChange={(event) =>
-                    setPolygonOpacityScale(Number.parseFloat(event.target.value))
-                  }
-                />
-              </label>
+              {!canEditStyleIndividually || !activeStyleDraft ? (
+                <p className="map-toolbar-meta">
+                  Selectionne ou cree un element pour regler son style.
+                </p>
+              ) : (
+                <>
+                  {activeStyleDraft.geometry === 'point' ? (
+                    <label className="map-toolbar-label small">
+                      Taille du point: {Math.round(activeStyleDraft.pointRadius)} px
+                      <input
+                        type="range"
+                        min={3}
+                        max={24}
+                        step={1}
+                        className="map-toolbar-range"
+                        value={activeStyleDraft.pointRadius}
+                        onChange={(event) =>
+                          applyStyleToCurrentDraft({
+                            pointRadius: Number.parseInt(event.target.value, 10),
+                          })
+                        }
+                      />
+                    </label>
+                  ) : (
+                    <label className="map-toolbar-label small">
+                      Epaisseur: {activeStyleDraft.lineWidth.toFixed(1)} px
+                      <input
+                        type="range"
+                        min={1}
+                        max={14}
+                        step={0.5}
+                        className="map-toolbar-range"
+                        value={activeStyleDraft.lineWidth}
+                        onChange={(event) =>
+                          applyStyleToCurrentDraft({
+                            lineWidth: Number.parseFloat(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                  {activeStyleDraft.geometry === 'polygon' ? (
+                    <label className="map-toolbar-label small">
+                      Opacite surface: {activeStyleDraft.fillOpacity.toFixed(2)}
+                      <input
+                        type="range"
+                        min={0.05}
+                        max={0.95}
+                        step={0.05}
+                        className="map-toolbar-range"
+                        value={activeStyleDraft.fillOpacity}
+                        onChange={(event) =>
+                          applyStyleToCurrentDraft({
+                            fillOpacity: Number.parseFloat(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  ) : null}
+                </>
+              )}
 
               {isMeasureMode ? (
                 <>

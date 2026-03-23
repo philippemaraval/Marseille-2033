@@ -1,5 +1,5 @@
 import { hasSupabase, supabase } from '../lib/supabase'
-import type { StatusId } from '../types/map'
+import type { FeatureStyle, StatusId } from '../types/map'
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -29,6 +29,7 @@ interface SnapshotPayload {
   layer_label: string
   layer_sort_order: number
   color: string
+  style?: FeatureStyle | null
   geometry_type: 'point' | 'line' | 'polygon'
   coordinates: unknown
   sort_order: number
@@ -68,6 +69,7 @@ export interface ImportFeatureInsert {
   layerLabel: string
   layerSortOrder: number
   color: string
+  style?: FeatureStyle | null
   geometryType: 'point' | 'line' | 'polygon'
   coordinates: unknown
   sortOrder: number
@@ -86,6 +88,15 @@ function normalizeAdminError(message: string): string {
   }
 
   return message
+}
+
+function isMissingStyleColumnError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('column') &&
+    normalized.includes('style') &&
+    normalized.includes('does not exist')
+  )
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -150,6 +161,10 @@ function asSnapshot(value: unknown): SnapshotPayload | null {
     layer_sort_order:
       typeof raw.layer_sort_order === 'number' ? raw.layer_sort_order : 0,
     color: raw.color,
+    style:
+      raw.style && typeof raw.style === 'object'
+        ? (raw.style as FeatureStyle)
+        : null,
     geometry_type: raw.geometry_type,
     coordinates: raw.coordinates,
     sort_order: raw.sort_order,
@@ -289,24 +304,35 @@ export async function restorePreviousFeatureVersion(
     return { ok: false, error: 'Snapshot de version invalide.' }
   }
 
-  const { error: updateError } = await supabase
+  const updatePayload = {
+    name: targetSnapshot.name,
+    status: targetSnapshot.status,
+    category: targetSnapshot.category,
+    layer_id: targetSnapshot.layer_id,
+    layer_label: targetSnapshot.layer_label,
+    layer_sort_order: targetSnapshot.layer_sort_order,
+    color: targetSnapshot.color,
+    style: targetSnapshot.style ?? null,
+    geometry_type: targetSnapshot.geometry_type,
+    coordinates: targetSnapshot.coordinates,
+    sort_order: targetSnapshot.sort_order,
+    source: targetSnapshot.source,
+    deleted_at: targetSnapshot.deleted_at,
+    deleted_by: targetSnapshot.deleted_by,
+  }
+
+  let { error: updateError } = await supabase
     .from('map_features')
-    .update({
-      name: targetSnapshot.name,
-      status: targetSnapshot.status,
-      category: targetSnapshot.category,
-      layer_id: targetSnapshot.layer_id,
-      layer_label: targetSnapshot.layer_label,
-      layer_sort_order: targetSnapshot.layer_sort_order,
-      color: targetSnapshot.color,
-      geometry_type: targetSnapshot.geometry_type,
-      coordinates: targetSnapshot.coordinates,
-      sort_order: targetSnapshot.sort_order,
-      source: targetSnapshot.source,
-      deleted_at: targetSnapshot.deleted_at,
-      deleted_by: targetSnapshot.deleted_by,
-    })
+    .update(updatePayload)
     .eq('id', featureId)
+  if (updateError && isMissingStyleColumnError(updateError.message)) {
+    const legacyPayload = { ...updatePayload, style: undefined }
+    const retry = await supabase
+      .from('map_features')
+      .update(legacyPayload)
+      .eq('id', featureId)
+    updateError = retry.error
+  }
 
   if (updateError) {
     return { ok: false, error: normalizeAdminError(updateError.message) }
@@ -361,13 +387,22 @@ export async function importFeaturesToSupabase(
       layer_label: entry.layerLabel,
       layer_sort_order: entry.layerSortOrder,
       color: entry.color,
+      style: entry.style ?? null,
       geometry_type: entry.geometryType,
       coordinates: entry.coordinates,
       sort_order: entry.sortOrder,
       source: entry.source ?? 'manual_import',
     }))
 
-    const { error } = await supabase.from('map_features').insert(rows)
+    let { error } = await supabase.from('map_features').insert(rows)
+    if (error && isMissingStyleColumnError(error.message)) {
+      const legacyRows = rows.map((row) => ({
+        ...row,
+        style: undefined,
+      }))
+      const retry = await supabase.from('map_features').insert(legacyRows)
+      error = retry.error
+    }
     if (error) {
       return { ok: false, error: normalizeAdminError(error.message) }
     }

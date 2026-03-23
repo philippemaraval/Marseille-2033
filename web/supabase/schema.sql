@@ -7,6 +7,7 @@ create table if not exists public.map_features (
   layer_label text not null,
   layer_sort_order integer not null default 0,
   color text not null default '#1d4ed8',
+  style jsonb null,
   geometry_type text not null check (geometry_type in ('point', 'line', 'polygon')),
   coordinates jsonb not null,
   sort_order integer not null default 0,
@@ -25,6 +26,9 @@ alter table public.map_features
 
 alter table public.map_features
   add column if not exists deleted_by uuid null;
+
+alter table public.map_features
+  add column if not exists style jsonb null;
 
 create index if not exists idx_map_features_layer
   on public.map_features (layer_id, sort_order);

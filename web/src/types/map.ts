@@ -1,10 +1,17 @@
 export type StatusId = 'existant' | 'en cours' | 'propose'
 
+export interface FeatureStyle {
+  pointRadius?: number
+  lineWidth?: number
+  fillOpacity?: number
+}
+
 export interface BaseFeature {
   id: string
   name: string
   status: StatusId
   color: string
+  style?: FeatureStyle
 }
 
 export interface PointFeature extends BaseFeature {

@@ -29,7 +29,7 @@ Variables utiles:
 
 1. Executer le schema SQL: `supabase/schema.sql`
    - Si la base existe deja: re-executer aussi le script pour ajouter les colonnes
-     `deleted_at`, `deleted_by`, `layer_sort_order` et les triggers de versioning.
+     `deleted_at`, `deleted_by`, `layer_sort_order`, `style` et les triggers de versioning.
 2. Configurer `.env` (voir `.env.example`)
 3. Charger l'import OSM en base:
 
