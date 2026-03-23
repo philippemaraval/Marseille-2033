@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ChangeEvent, FormEvent } from 'react'
+import type {
+  ChangeEvent,
+  FormEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from 'react'
 import type {
   LatLngBoundsExpression,
   LatLngTuple,
@@ -15,6 +20,7 @@ import {
   Polygon,
   Polyline,
   Popup,
+  Rectangle,
   TileLayer,
   useMapEvents,
 } from 'react-leaflet'
@@ -101,6 +107,7 @@ interface MapClickCaptureProps {
   onMapClick: (position: LatLngTuple) => void
   onMapDoubleClick?: () => void
   onMapContextMenu?: () => void
+  onMapMouseMove?: (position: LatLngTuple) => void
 }
 
 interface SupabaseKeyMetadata {
@@ -108,6 +115,12 @@ interface SupabaseKeyMetadata {
   role: string | null
   expIso: string | null
   error: string | null
+}
+
+interface FeatureContextMenuState {
+  featureId: string
+  clientX: number
+  clientY: number
 }
 
 const MARSEILLE_CENTER: LatLngTuple = [43.2965, 5.3698]
@@ -306,6 +319,7 @@ function MapClickCapture({
   onMapClick,
   onMapDoubleClick,
   onMapContextMenu,
+  onMapMouseMove,
 }: MapClickCaptureProps) {
   useMapEvents({
     click(event) {
@@ -327,6 +341,12 @@ function MapClickCapture({
       }
       event.originalEvent.preventDefault()
       onMapContextMenu()
+    },
+    mousemove(event) {
+      if (!enabled || !onMapMouseMove) {
+        return
+      }
+      onMapMouseMove([event.latlng.lat, event.latlng.lng])
     },
   })
 
@@ -452,6 +472,44 @@ function markerEventToPosition(event: LeafletEvent): LatLngTuple {
   return [latLng.lat, latLng.lng]
 }
 
+function normalizeBounds(
+  first: LatLngTuple,
+  second: LatLngTuple,
+): [LatLngTuple, LatLngTuple] {
+  const south = Math.min(first[0], second[0])
+  const north = Math.max(first[0], second[0])
+  const west = Math.min(first[1], second[1])
+  const east = Math.max(first[1], second[1])
+  return [
+    [south, west],
+    [north, east],
+  ]
+}
+
+function isPointInsideBounds(
+  point: LatLngTuple,
+  bounds: [LatLngTuple, LatLngTuple],
+): boolean {
+  return (
+    point[0] >= bounds[0][0] &&
+    point[0] <= bounds[1][0] &&
+    point[1] >= bounds[0][1] &&
+    point[1] <= bounds[1][1]
+  )
+}
+
+function featureIntersectsBounds(
+  feature: GeometryFeature,
+  bounds: [LatLngTuple, LatLngTuple],
+): boolean {
+  const points = getFeaturePoints(feature)
+  return points.some((point) => isPointInsideBounds(point, bounds))
+}
+
+function midpoint(a: LatLngTuple, b: LatLngTuple): LatLngTuple {
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -478,6 +536,15 @@ function App() {
   const [adminNotice, setAdminNotice] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null)
+  const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
+  const [isZoneSelectionMode, setIsZoneSelectionMode] = useState(false)
+  const [zoneSelectionStart, setZoneSelectionStart] = useState<LatLngTuple | null>(
+    null,
+  )
+  const [zoneSelectionCurrent, setZoneSelectionCurrent] =
+    useState<LatLngTuple | null>(null)
+  const [featureContextMenu, setFeatureContextMenu] =
+    useState<FeatureContextMenuState | null>(null)
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() =>
     buildDefaultDraft(fallbackLayers),
   )
@@ -499,6 +566,7 @@ function App() {
   const isDrawingOnMap =
     isAdmin &&
     (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
+  const isMapInteractionCaptureEnabled = isDrawingOnMap || isZoneSelectionMode
   const isDirectGeometryEditing =
     isAdmin && adminMode === 'edit' && !isRedrawingEditGeometry
 
@@ -518,6 +586,17 @@ function App() {
       new DivIcon({
         className: 'vertex-handle-marker',
         html: '<span></span>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      }),
+    [],
+  )
+
+  const midpointHandleIcon = useMemo(
+    () =>
+      new DivIcon({
+        className: 'midpoint-handle-marker',
+        html: '<span>+</span>',
         iconSize: [14, 14],
         iconAnchor: [7, 7],
       }),
@@ -738,6 +817,16 @@ function App() {
     () => (selectedFeatureId ? featureById.get(selectedFeatureId) ?? null : null),
     [featureById, selectedFeatureId],
   )
+  const selectedFeatureIdSet = useMemo(
+    () => new Set(selectedFeatureIds),
+    [selectedFeatureIds],
+  )
+  const zoneSelectionBounds = useMemo(() => {
+    if (!zoneSelectionStart || !zoneSelectionCurrent) {
+      return null
+    }
+    return normalizeBounds(zoneSelectionStart, zoneSelectionCurrent)
+  }, [zoneSelectionCurrent, zoneSelectionStart])
 
   const layerSuggestions = useMemo(
     () =>
@@ -818,40 +907,130 @@ function App() {
     }))
   }
 
+  const focusFeatureById = useCallback(
+    (featureId: string, updateSelection: 'single' | 'preserve' = 'single') => {
+      const match = featureById.get(featureId)
+      if (!match) {
+        return false
+      }
+
+      setSelectedFeatureId(featureId)
+      if (updateSelection === 'single') {
+        setSelectedFeatureIds([featureId])
+      }
+      setEditDraft({
+        name: match.feature.name,
+        status: match.feature.status,
+        color: match.feature.color,
+        category: match.category,
+        layerId: match.layerId,
+        layerLabel: match.layerLabel,
+        geometry: match.feature.geometry,
+      })
+      setEditPoints(getFeaturePoints(match.feature))
+      setIsRedrawingEditGeometry(false)
+      setAdminNotice(null)
+      void refreshFeatureVersions(featureId)
+      return true
+    },
+    [featureById, refreshFeatureVersions],
+  )
+
+  const toggleFeatureInSelection = useCallback((featureId: string) => {
+    setSelectedFeatureIds((current) => {
+      if (current.includes(featureId)) {
+        return current.filter((id) => id !== featureId)
+      }
+      return [...current, featureId]
+    })
+  }, [])
+
   const handleFeatureClick = useCallback(
     (featureId: string, event: LeafletMouseEvent) => {
       if (!isAdmin) {
         return
       }
-      const match = featureById.get(featureId)
       event.originalEvent.stopPropagation()
-      setSelectedFeatureId(featureId)
-      if (match) {
-        setEditDraft({
-          name: match.feature.name,
-          status: match.feature.status,
-          color: match.feature.color,
-          category: match.category,
-          layerId: match.layerId,
-          layerLabel: match.layerLabel,
-          geometry: match.feature.geometry,
-        })
-        setEditPoints(getFeaturePoints(match.feature))
-        setIsRedrawingEditGeometry(false)
+      setFeatureContextMenu(null)
+
+      if (event.originalEvent.shiftKey) {
+        toggleFeatureInSelection(featureId)
+        const didFocus = focusFeatureById(featureId, 'preserve')
+        if (didFocus) {
+          setAdminNotice('Selection multiple mise a jour.')
+        }
+      } else {
+        focusFeatureById(featureId, 'single')
       }
-      setAdminNotice(null)
-      void refreshFeatureVersions(featureId)
+
       if (adminMode === 'delete' || adminMode === 'edit') {
         return
       }
       setAdminMode('edit')
     },
-    [adminMode, featureById, isAdmin, refreshFeatureVersions],
+    [adminMode, focusFeatureById, isAdmin, toggleFeatureInSelection],
+  )
+
+  const handleFeatureContextMenu = useCallback(
+    (featureId: string, event: LeafletMouseEvent) => {
+      if (!isAdmin) {
+        return
+      }
+      event.originalEvent.preventDefault()
+      event.originalEvent.stopPropagation()
+
+      const mouseEvent = event.originalEvent as MouseEvent
+      setFeatureContextMenu({
+        featureId,
+        clientX: mouseEvent.clientX,
+        clientY: mouseEvent.clientY,
+      })
+    },
+    [isAdmin],
   )
 
   const handleMapClick = useCallback(
     (position: LatLngTuple) => {
       if (!isAdmin) {
+        return
+      }
+      setFeatureContextMenu(null)
+
+      if (isZoneSelectionMode) {
+        if (!zoneSelectionStart) {
+          setZoneSelectionStart(position)
+          setZoneSelectionCurrent(position)
+          setAdminNotice('Selection zone: clique le coin oppose.')
+          return
+        }
+
+        const bounds = normalizeBounds(zoneSelectionStart, position)
+        const ids = visibleLayers
+          .flatMap((layer) =>
+            layer.features
+              .filter((feature) =>
+                statusFilter === 'all' ? true : feature.status === statusFilter,
+              )
+              .filter((feature) => featureIntersectsBounds(feature, bounds))
+              .map((feature) => feature.id),
+          )
+
+        setSelectedFeatureIds(ids)
+        if (ids.length > 0) {
+          focusFeatureById(ids[0], 'preserve')
+        } else {
+          setSelectedFeatureId(null)
+          setEditDraft(null)
+          setEditPoints([])
+        }
+        setIsZoneSelectionMode(false)
+        setZoneSelectionStart(null)
+        setZoneSelectionCurrent(null)
+        setAdminNotice(
+          ids.length > 0
+            ? `${ids.length} element(s) selectionne(s) par zone.`
+            : 'Aucun element dans la zone.',
+        )
         return
       }
 
@@ -870,7 +1049,28 @@ function App() {
         setAdminNotice(null)
       }
     },
-    [adminMode, createDraft.geometry, editDraft, isAdmin, isRedrawingEditGeometry],
+    [
+      adminMode,
+      createDraft.geometry,
+      editDraft,
+      focusFeatureById,
+      isAdmin,
+      isRedrawingEditGeometry,
+      isZoneSelectionMode,
+      statusFilter,
+      visibleLayers,
+      zoneSelectionStart,
+    ],
+  )
+
+  const handleMapMouseMove = useCallback(
+    (position: LatLngTuple) => {
+      if (!isAdmin || !isZoneSelectionMode || !zoneSelectionStart) {
+        return
+      }
+      setZoneSelectionCurrent(position)
+    },
+    [isAdmin, isZoneSelectionMode, zoneSelectionStart],
   )
 
   const handleToolbarToolClick = useCallback(
@@ -882,6 +1082,10 @@ function App() {
 
       if (mode === 'create' && geometry) {
         setAdminMode('create')
+        setIsZoneSelectionMode(false)
+        setZoneSelectionStart(null)
+        setZoneSelectionCurrent(null)
+        setFeatureContextMenu(null)
         setCreateDraft((current) => ({
           ...current,
           geometry,
@@ -893,12 +1097,14 @@ function App() {
 
       if (mode === 'edit') {
         setAdminMode('edit')
+        setFeatureContextMenu(null)
         setIsRedrawingEditGeometry(false)
         return
       }
 
       if (mode === 'delete') {
         setAdminMode('delete')
+        setFeatureContextMenu(null)
       }
     },
     [isAdmin],
@@ -950,9 +1156,14 @@ function App() {
 
     setAdminMode('view')
     setSelectedFeatureId(null)
+    setSelectedFeatureIds([])
     setEditDraft(null)
     setEditPoints([])
     setIsRedrawingEditGeometry(false)
+    setIsZoneSelectionMode(false)
+    setZoneSelectionStart(null)
+    setZoneSelectionCurrent(null)
+    setFeatureContextMenu(null)
     setTrashItems([])
     setVersionItems([])
     setAdminNotice('Mode admin desactive.')
@@ -1034,6 +1245,7 @@ function App() {
 
     setCreatePoints([])
     setSelectedFeatureId(id)
+    setSelectedFeatureIds([id])
     setEditDraft({
       name: finalName,
       status: createDraft.status,
@@ -1117,44 +1329,145 @@ function App() {
 
     await syncSupabaseLayers(layerId)
     setSelectedFeatureId(selectedFeatureId)
+    setSelectedFeatureIds([selectedFeatureId])
     await refreshFeatureVersions(selectedFeatureId)
     setIsSaving(false)
     setAdminNotice('Element modifie.')
   }
 
-  const handleDeleteFeature = async () => {
-    if (!isAdmin || !selectedFeatureId || !selectedFeature) {
-      setAdminNotice('Selectionne un element a supprimer.')
-      return
-    }
+  const handleDeleteFeatureByIds = useCallback(
+    async (ids: string[]) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
 
-    const confirmed = window.confirm(
-      `Deplacer "${selectedFeature.feature.name}" dans la corbeille ?`,
-    )
-    if (!confirmed) {
-      return
-    }
+      const uniqueIds = Array.from(new Set(ids)).filter((id) => featureById.has(id))
+      if (uniqueIds.length === 0) {
+        setAdminNotice('Selectionne un element a supprimer.')
+        return
+      }
 
-    setIsSaving(true)
-    setAdminNotice(null)
+      const targetLabel =
+        uniqueIds.length === 1
+          ? `"${featureById.get(uniqueIds[0])?.feature.name ?? 'element'}"`
+          : `${uniqueIds.length} elements`
+      const confirmed = window.confirm(
+        `Deplacer ${targetLabel} dans la corbeille ?`,
+      )
+      if (!confirmed) {
+        return
+      }
 
-    const result = await moveFeatureToTrash(selectedFeatureId)
-    if (!result.ok) {
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      let deletedCount = 0
+      let firstError: string | null = null
+      for (const id of uniqueIds) {
+        const result = await moveFeatureToTrash(id)
+        if (!result.ok) {
+          if (!firstError) {
+            firstError = result.error
+          }
+          continue
+        }
+        deletedCount += 1
+      }
+
+      if (deletedCount === 0) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur suppression: ${firstError ?? 'suppression impossible.'}`)
+        return
+      }
+
+      setSelectedFeatureId(null)
+      setSelectedFeatureIds([])
+      setEditDraft(null)
+      setEditPoints([])
+      setIsRedrawingEditGeometry(false)
+      setVersionItems([])
+      await syncSupabaseLayers()
+      await refreshTrash()
       setIsSaving(false)
-      setAdminNotice(`Erreur suppression: ${result.error}`)
+      setAdminNotice(
+        firstError
+          ? `${deletedCount} element(s) deplaces dans la corbeille (avec erreurs partielles).`
+          : `${deletedCount} element(s) deplaces dans la corbeille.`,
+      )
+    },
+    [featureById, isAdmin, refreshTrash, syncSupabaseLayers],
+  )
+
+  const handleDeleteFeature = useCallback(async () => {
+    if (!isAdmin) {
+      setAdminNotice('Connexion admin requise.')
       return
     }
+    const ids = selectedFeatureIds.length > 0 ? selectedFeatureIds : []
+    if (ids.length === 0 && selectedFeatureId) {
+      await handleDeleteFeatureByIds([selectedFeatureId])
+      return
+    }
+    await handleDeleteFeatureByIds(ids)
+  }, [handleDeleteFeatureByIds, isAdmin, selectedFeatureId, selectedFeatureIds])
 
-    setSelectedFeatureId(null)
-    setEditDraft(null)
-    setEditPoints([])
-    setIsRedrawingEditGeometry(false)
-    setVersionItems([])
-    await syncSupabaseLayers()
-    await refreshTrash()
-    setIsSaving(false)
-    setAdminNotice('Element deplace dans la corbeille.')
-  }
+  const handleToggleZoneSelection = useCallback(() => {
+    if (!isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+    if (adminMode === 'create') {
+      setAdminMode('edit')
+    }
+    if (isZoneSelectionMode) {
+      setIsZoneSelectionMode(false)
+      setZoneSelectionStart(null)
+      setZoneSelectionCurrent(null)
+      setAdminNotice('Selection zone annulee.')
+      return
+    }
+    setFeatureContextMenu(null)
+    setIsZoneSelectionMode(true)
+    setZoneSelectionStart(null)
+    setZoneSelectionCurrent(null)
+    setAdminNotice('Selection zone active: clique 2 coins sur la carte.')
+  }, [adminMode, isAdmin, isZoneSelectionMode])
+
+  const handleClearMultiSelection = useCallback(() => {
+    setSelectedFeatureIds(selectedFeatureId ? [selectedFeatureId] : [])
+    setAdminNotice('Selection multiple reinitialisee.')
+  }, [selectedFeatureId])
+
+  const handleContextMenuAction = useCallback(
+    async (action: 'edit' | 'toggle' | 'delete') => {
+      if (!featureContextMenu) {
+        return
+      }
+      const featureId = featureContextMenu.featureId
+      setFeatureContextMenu(null)
+
+      if (action === 'edit') {
+        const didFocus = focusFeatureById(featureId, 'single')
+        if (didFocus) {
+          setAdminMode('edit')
+        }
+        return
+      }
+
+      if (action === 'toggle') {
+        toggleFeatureInSelection(featureId)
+        const didFocus = focusFeatureById(featureId, 'preserve')
+        if (didFocus) {
+          setAdminNotice('Selection multiple mise a jour.')
+        }
+        return
+      }
+
+      await handleDeleteFeatureByIds([featureId])
+    },
+    [featureContextMenu, focusFeatureById, handleDeleteFeatureByIds, toggleFeatureInSelection],
+  )
 
   const handleMapDoubleClick = () => {
     if (!isAdmin) {
@@ -1185,6 +1498,15 @@ function App() {
 
   const handleMapContextMenu = () => {
     if (!isAdmin) {
+      return
+    }
+    setFeatureContextMenu(null)
+
+    if (isZoneSelectionMode) {
+      setIsZoneSelectionMode(false)
+      setZoneSelectionStart(null)
+      setZoneSelectionCurrent(null)
+      setAdminNotice('Selection zone annulee.')
       return
     }
 
@@ -1222,6 +1544,45 @@ function App() {
       setAdminNotice('Geometrie ajustee. Clique sur "Enregistrer" pour valider.')
     },
     [handleMoveEditVertex],
+  )
+
+  const handleInsertEditVertex = useCallback(
+    (afterIndex: number, position: LatLngTuple) => {
+      if (!editDraft || editDraft.geometry === 'point') {
+        return
+      }
+      setEditPoints((current) => {
+        if (current.length < 2) {
+          return current
+        }
+        const safeIndex = Math.min(Math.max(afterIndex, -1), current.length - 1)
+        const next = [...current]
+        next.splice(safeIndex + 1, 0, position)
+        return next
+      })
+      setAdminNotice('Sommet ajoute. Clique sur "Enregistrer" pour valider.')
+    },
+    [editDraft],
+  )
+
+  const handleDeleteEditVertex = useCallback(
+    (index: number) => {
+      if (!editDraft || editDraft.geometry === 'point') {
+        return
+      }
+
+      const minPoints = MIN_POINTS_REQUIRED[editDraft.geometry]
+      setEditPoints((current) => {
+        if (current.length <= minPoints || index < 0 || index >= current.length) {
+          return current
+        }
+        const next = [...current]
+        next.splice(index, 1)
+        return next
+      })
+      setAdminNotice('Sommet supprime. Clique sur "Enregistrer" pour valider.')
+    },
+    [editDraft],
   )
 
   const handleToolbarToggleRedraw = useCallback(() => {
@@ -1274,7 +1635,10 @@ function App() {
       void handleSaveEdition()
       return
     }
-    if (adminMode === 'delete' && selectedFeatureId) {
+    if (
+      adminMode === 'delete' &&
+      (selectedFeatureIds.length > 0 || selectedFeatureId)
+    ) {
       void handleDeleteFeature()
     }
   }
@@ -1298,6 +1662,7 @@ function App() {
     await syncSupabaseLayers()
     await refreshTrash()
     setSelectedFeatureId(featureId)
+    setSelectedFeatureIds([featureId])
     await refreshFeatureVersions(featureId)
     setIsSaving(false)
     setAdminMode('edit')
@@ -1635,6 +2000,11 @@ function App() {
         handleToolbarToggleRedraw()
         return
       }
+      if (key === 'z' && (adminMode === 'edit' || adminMode === 'delete')) {
+        event.preventDefault()
+        handleToggleZoneSelection()
+        return
+      }
 
       if (event.key === 'Backspace') {
         if (adminMode === 'create' && createPoints.length > 0) {
@@ -1678,7 +2048,10 @@ function App() {
           handleToolbarPrimaryAction()
           return
         }
-        if (adminMode === 'delete' && selectedFeatureId) {
+        if (
+          adminMode === 'delete' &&
+          (selectedFeatureIds.length > 0 || selectedFeatureId)
+        ) {
           event.preventDefault()
           handleToolbarPrimaryAction()
           return
@@ -1699,6 +2072,14 @@ function App() {
           }
           return
         }
+        if (isZoneSelectionMode) {
+          event.preventDefault()
+          setIsZoneSelectionMode(false)
+          setZoneSelectionStart(null)
+          setZoneSelectionCurrent(null)
+          setAdminNotice('Selection zone annulee.')
+          return
+        }
         if (adminMode !== 'view') {
           event.preventDefault()
           setAdminMode('view')
@@ -1717,14 +2098,41 @@ function App() {
     editDraft,
     editPoints,
     handleToolbarPrimaryAction,
+    handleToggleZoneSelection,
     handleToolbarToggleRedraw,
     handleToolbarToolClick,
     handleToolbarUndoLastPoint,
     isAdmin,
     isRedrawingEditGeometry,
+    isZoneSelectionMode,
     selectedFeature,
     selectedFeatureId,
+    selectedFeatureIds,
   ])
+
+  useEffect(() => {
+    if (!featureContextMenu) {
+      return
+    }
+
+    const closeMenu = () => {
+      setFeatureContextMenu(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    }
+
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [featureContextMenu])
 
   const renderDraftGeometry = () => {
     if (!isAdmin) {
@@ -1922,7 +2330,7 @@ function App() {
       )
     }
 
-    return editPoints.map((position, index) => (
+    const vertexMarkers = editPoints.map((position, index) => (
       <Marker
         key={`edit-handle-${selectedFeatureId}-${index}`}
         position={position}
@@ -1931,9 +2339,52 @@ function App() {
         eventHandlers={{
           drag: (event) => handleEditVertexDrag(index, event),
           dragend: (event) => handleEditVertexDragEnd(index, event),
+          contextmenu: (event: LeafletMouseEvent) => {
+            event.originalEvent.preventDefault()
+            event.originalEvent.stopPropagation()
+            handleDeleteEditVertex(index)
+          },
         }}
       />
     ))
+
+    const midpointMarkers: ReactNode[] = []
+    for (let index = 0; index < editPoints.length - 1; index += 1) {
+      midpointMarkers.push(
+        <Marker
+          key={`edit-midpoint-${selectedFeatureId}-${index}`}
+          position={midpoint(editPoints[index], editPoints[index + 1])}
+          icon={midpointHandleIcon}
+          eventHandlers={{
+            click: (event: LeafletMouseEvent) => {
+              event.originalEvent.preventDefault()
+              event.originalEvent.stopPropagation()
+              handleInsertEditVertex(index, midpoint(editPoints[index], editPoints[index + 1]))
+            },
+          }}
+        />,
+      )
+    }
+
+    if (editDraft.geometry === 'polygon' && editPoints.length >= 3) {
+      const lastIndex = editPoints.length - 1
+      midpointMarkers.push(
+        <Marker
+          key={`edit-midpoint-${selectedFeatureId}-close`}
+          position={midpoint(editPoints[lastIndex], editPoints[0])}
+          icon={midpointHandleIcon}
+          eventHandlers={{
+            click: (event: LeafletMouseEvent) => {
+              event.originalEvent.preventDefault()
+              event.originalEvent.stopPropagation()
+              handleInsertEditVertex(lastIndex, midpoint(editPoints[lastIndex], editPoints[0]))
+            },
+          }}
+        />,
+      )
+    }
+
+    return [...vertexMarkers, ...midpointMarkers]
   }
 
   const renderLayerFeatures = (layer: LayerConfig) =>
@@ -1942,9 +2393,10 @@ function App() {
         statusFilter === 'all' ? true : feature.status === statusFilter,
       )
       .map((feature) => {
-        const isSelected = selectedFeatureId === feature.id
+        const isSelected = selectedFeatureIdSet.has(feature.id)
+        const isFocusedSelection = selectedFeatureId === feature.id
         const isHiddenSelectedGeometry =
-          isSelected &&
+          isFocusedSelection &&
           adminMode === 'edit' &&
           editDraft !== null &&
           editPoints.length > 0
@@ -1979,6 +2431,8 @@ function App() {
           ? {
               click: (event: LeafletMouseEvent) =>
                 handleFeatureClick(feature.id, event),
+              contextmenu: (event: LeafletMouseEvent) =>
+                handleFeatureContextMenu(feature.id, event),
             }
           : undefined
 
@@ -2067,7 +2521,7 @@ function App() {
           ? isGeometryComplete(editDraft.geometry, editPoints)
           : Boolean(selectedFeatureId)
         : adminMode === 'delete'
-          ? Boolean(selectedFeatureId)
+          ? selectedFeatureIds.length > 0 || Boolean(selectedFeatureId)
           : false
 
   const isGuidedDrawing =
@@ -3011,7 +3465,7 @@ function App() {
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
             <p className="map-toolbar-shortcuts">
-              Raccourcis: 1/2/3, E, D, R, Entrer, Retour, Esc, Double-clic
+              Raccourcis: 1/2/3, E, D, R, Z, Shift+clic, Entrer, Retour, Esc
             </p>
 
             {adminMode === 'create' ? (
@@ -3102,15 +3556,41 @@ function App() {
             {adminMode === 'edit' ? (
               <div className="map-toolbar-section">
                 {!selectedFeature || !editDraft ? (
-                  <p className="map-toolbar-meta">
-                    Clique un element sur la carte pour l'editer.
-                  </p>
+                  <>
+                    <p className="map-toolbar-meta">
+                      Clique un element sur la carte pour l'editer.
+                    </p>
+                    <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
+                        onClick={handleToggleZoneSelection}
+                        title="Selection par zone (Z)"
+                      >
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                      </button>
+                    </div>
+                    <p className="map-toolbar-meta">
+                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                    </p>
+                  </>
                 ) : (
                   <>
                     <p className="map-toolbar-meta">
                       Selection: <strong>{selectedFeature.feature.name}</strong>
                     </p>
+                    <p className="map-toolbar-meta">
+                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                    </p>
                     <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
+                        onClick={handleToggleZoneSelection}
+                        title="Selection par zone (Z)"
+                      >
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                      </button>
                       <button
                         type="button"
                         className={`ghost-button mini-button${isRedrawingEditGeometry ? ' active' : ''}`}
@@ -3139,12 +3619,24 @@ function App() {
                       >
                         {isSaving ? '...' : 'Enregistrer'}
                       </button>
+                      {selectedFeatureIds.length > 1 ? (
+                        <button
+                          type="button"
+                          className="ghost-button mini-button"
+                          onClick={handleClearMultiSelection}
+                        >
+                          Garder 1
+                        </button>
+                      ) : null}
                     </div>
                     {!isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">
-                        Astuce: glisse directement le point/sommet sur la carte.
+                        Astuce: glisse un sommet, clic sur + pour inserer, clic droit sur sommet pour supprimer.
                       </p>
                     ) : null}
+                    <p className="map-toolbar-meta">
+                      Selection multiple: Shift+clic ou bouton "Selection zone".
+                    </p>
                     {isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">
                         Redessin: {toolbarPointCount} / {toolbarMinPoints} points
@@ -3158,22 +3650,57 @@ function App() {
             {adminMode === 'delete' ? (
               <div className="map-toolbar-section">
                 {!selectedFeature ? (
-                  <p className="map-toolbar-meta">
-                    Clique un element sur la carte pour le supprimer.
-                  </p>
+                  <>
+                    <p className="map-toolbar-meta">
+                      Clique un element sur la carte pour le supprimer.
+                    </p>
+                    <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
+                        onClick={handleToggleZoneSelection}
+                        title="Selection par zone (Z)"
+                      >
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                      </button>
+                    </div>
+                    <p className="map-toolbar-meta">
+                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                    </p>
+                  </>
                 ) : (
                   <>
                     <p className="map-toolbar-meta">
                       Selection: <strong>{selectedFeature.feature.name}</strong>
                     </p>
-                    <button
-                      type="button"
-                      className="danger-button mini-button"
-                      onClick={handleToolbarPrimaryAction}
-                      disabled={!toolbarCanConfirm || isSaving}
-                    >
-                      {isSaving ? '...' : 'Mettre en corbeille'}
-                    </button>
+                    <p className="map-toolbar-meta">
+                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                    </p>
+                    <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
+                        onClick={handleToggleZoneSelection}
+                        title="Selection par zone (Z)"
+                      >
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button mini-button"
+                        onClick={handleToolbarPrimaryAction}
+                        disabled={!toolbarCanConfirm || isSaving}
+                      >
+                        {isSaving
+                          ? '...'
+                          : selectedFeatureIds.length > 1
+                            ? `Corbeille (${selectedFeatureIds.length})`
+                            : 'Mettre en corbeille'}
+                      </button>
+                    </div>
+                    <p className="map-toolbar-meta">
+                      Shift+clic ajoute/retire un element de la selection.
+                    </p>
                   </>
                 )}
               </div>
@@ -3210,6 +3737,41 @@ function App() {
             </div>
           </div>
         ) : null}
+        {isAdmin && featureContextMenu ? (
+          <div
+            className="feature-context-menu"
+            role="menu"
+            style={{
+              left: `${featureContextMenu.clientX}px`,
+              top: `${featureContextMenu.clientY}px`,
+            }}
+            onClick={(event: ReactMouseEvent<HTMLDivElement>) => {
+              event.stopPropagation()
+            }}
+          >
+            <button
+              type="button"
+              className="feature-context-menu-item"
+              onClick={() => void handleContextMenuAction('edit')}
+            >
+              Editer cet element
+            </button>
+            <button
+              type="button"
+              className="feature-context-menu-item"
+              onClick={() => void handleContextMenuAction('toggle')}
+            >
+              Ajouter/retirer de la selection
+            </button>
+            <button
+              type="button"
+              className="feature-context-menu-item danger"
+              onClick={() => void handleContextMenuAction('delete')}
+            >
+              Mettre en corbeille
+            </button>
+          </div>
+        ) : null}
         <MapContainer
           center={MARSEILLE_CENTER}
           zoom={12}
@@ -3217,7 +3779,7 @@ function App() {
           maxZoom={18}
           maxBounds={METROPOLE_BOUNDS}
           maxBoundsViscosity={1}
-          doubleClickZoom={!isDrawingOnMap}
+          doubleClickZoom={!isMapInteractionCaptureEnabled}
           attributionControl={false}
           className="map"
         >
@@ -3226,13 +3788,26 @@ function App() {
             attribution={BASE_MAPS[baseMapId].attribution}
           />
           <MapClickCapture
-            enabled={isDrawingOnMap}
+            enabled={isMapInteractionCaptureEnabled}
             onMapClick={handleMapClick}
             onMapDoubleClick={handleMapDoubleClick}
             onMapContextMenu={handleMapContextMenu}
+            onMapMouseMove={handleMapMouseMove}
           />
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
           {renderDraftGeometry()}
+          {zoneSelectionBounds ? (
+            <Rectangle
+              bounds={zoneSelectionBounds}
+              pathOptions={{
+                color: '#0f172a',
+                weight: 1.5,
+                dashArray: '5 4',
+                fillColor: '#93c5fd',
+                fillOpacity: 0.16,
+              }}
+            />
+          ) : null}
           {renderDirectEditHandles()}
         </MapContainer>
       </main>

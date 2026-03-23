@@ -609,19 +609,54 @@
   gap: 6px;
 }
 
+.feature-context-menu {
+  position: fixed;
+  z-index: 1400;
+  min-width: 220px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.feature-context-menu-item {
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.feature-context-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.feature-context-menu-item.danger {
+  color: #991b1b;
+}
+
 .map-pane.is-drawing .leaflet-container {
   cursor: crosshair;
 }
 
 .point-handle-marker,
-.vertex-handle-marker {
+.vertex-handle-marker,
+.midpoint-handle-marker {
   background: transparent;
   border: 0;
   cursor: grab;
 }
 
 .point-handle-marker span,
-.vertex-handle-marker span {
+.vertex-handle-marker span,
+.midpoint-handle-marker span {
   display: block;
   border-radius: 999px;
   background: #ffffff;
@@ -638,6 +673,18 @@
   width: 14px;
   height: 14px;
   border: 2px solid #0f172a;
+}
+
+.midpoint-handle-marker span {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #0f172a;
+  background: #dbeafe;
+  color: #0f172a;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
 }
 
 .map {
