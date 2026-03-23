@@ -76,6 +76,31 @@ npm run build
 npm run lint
 ```
 
+## Sauvegardes quotidiennes
+
+Backup local ponctuel:
+
+```bash
+npm run backup:supabase
+```
+
+Variables requises:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Le backup cree:
+- `backups/marseille2033-backup-<timestamp>.json`
+- `backups/latest.json`
+
+Workflow GitHub Actions:
+- fichier: `.github/workflows/daily-supabase-backup.yml`
+- frequence: quotidienne (02:17 UTC) + declenchement manuel
+- sortie: artifact telechargeable (retention 30 jours)
+
+Secrets GitHub a configurer (`Settings > Secrets and variables > Actions`):
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
 ## Cloudflare Pages
 
 - Branch: `main`
