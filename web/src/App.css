@@ -2618,3 +2618,165 @@
     white-space: normal;
   }
 }
+
+/* Overlay layout restore: keep map HUD/actions in corners above the map */
+.app-shell .map-pane {
+  position: relative;
+  display: block;
+  padding: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.app-shell .map-pane > .map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-shell .map-pane > .map-floating-actions {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0;
+}
+
+.app-shell .map-pane > .map-welcome-hint {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  z-index: 1090;
+  width: min(320px, calc(100% - 24px));
+  max-width: none;
+  margin: 0;
+}
+
+.app-shell .map-pane > .map-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: auto;
+  bottom: auto;
+  z-index: 1085;
+  width: min(320px, calc(100% - 24px));
+  max-width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+}
+
+.app-shell .map-pane > .map-scale-hud {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 1100;
+  align-self: auto;
+  justify-self: auto;
+  margin: 0;
+}
+
+.app-shell .map-pane > .map-cursor-hud {
+  position: absolute;
+  right: 12px;
+  left: auto;
+  bottom: 12px;
+  z-index: 1100;
+  width: auto;
+  max-width: min(320px, calc(100% - 24px));
+  min-height: 0;
+  justify-self: auto;
+  justify-items: end;
+  text-align: right;
+}
+
+.app-shell .map-pane > .shortcut-help-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1200;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.28);
+  display: grid;
+  place-items: center;
+}
+
+.app-shell .map-pane > .shortcut-help-panel {
+  width: min(420px, 100%);
+  max-width: min(420px, 100%);
+}
+
+.app-shell .map-pane > .map-drawing-hud {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 1100;
+  width: min(420px, calc(100% - 24px));
+  max-width: min(420px, calc(100% - 24px));
+  margin: 0;
+}
+
+.app-shell .map-pane > .feature-context-menu {
+  position: fixed;
+  z-index: 1400;
+  width: auto;
+  min-width: 220px;
+  left: auto;
+  top: auto;
+}
+
+@media (max-width: 980px) {
+  .app-shell .map-pane > .map-floating-actions {
+    top: 8px;
+    left: 8px;
+  }
+
+  .app-shell .map-pane > .map-welcome-hint {
+    top: 40px;
+    left: 8px;
+    width: calc(100% - 16px);
+  }
+
+  .app-shell .map-pane > .map-toolbar {
+    top: auto;
+    right: 8px;
+    left: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+    max-height: 48%;
+  }
+
+  .app-shell .map-pane > .map-scale-hud {
+    left: 8px;
+    bottom: 8px;
+  }
+
+  .app-shell .map-pane > .map-cursor-hud {
+    right: 8px;
+    bottom: 8px;
+    max-width: min(300px, calc(100% - 16px));
+  }
+
+  .app-shell .map-pane > .map-drawing-hud {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    transform: none;
+    bottom: 178px;
+  }
+
+  .app-shell .map-pane > .shortcut-help-overlay {
+    padding: 10px;
+  }
+}
