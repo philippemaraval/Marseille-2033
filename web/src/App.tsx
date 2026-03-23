@@ -985,7 +985,9 @@ function App() {
             setVersionItems([])
           }
         } else {
-          setSelectedFeatureIds((current) => [...current, featureId])
+          setSelectedFeatureIds((current) =>
+            current.includes(featureId) ? current : [...current, featureId],
+          )
           void focusFeatureById(featureId, 'keep')
         }
         setAdminNotice('Selection multiple mise a jour.')
@@ -1531,7 +1533,9 @@ function App() {
             setVersionItems([])
           }
         } else {
-          setSelectedFeatureIds((current) => [...current, featureId])
+          setSelectedFeatureIds((current) =>
+            current.includes(featureId) ? current : [...current, featureId],
+          )
           void focusFeatureById(featureId, 'keep')
         }
         setAdminNotice('Selection multiple mise a jour.')
@@ -2523,13 +2527,13 @@ function App() {
             <CircleMarker
               key={feature.id}
               center={feature.position}
-              radius={isSelected ? 8 : 6}
+              radius={isSelected ? 9 : 6}
               eventHandlers={eventHandlers}
               pathOptions={{
-                color: feature.color,
+                color: isSelected ? '#0f172a' : feature.color,
                 fillColor: feature.color,
-                fillOpacity: 0.85,
-                weight: isSelected ? 4 : 2,
+                fillOpacity: isSelected ? 0.95 : 0.85,
+                weight: isSelected ? 3 : 2,
               }}
             >
               {popup}
@@ -3719,7 +3723,7 @@ function App() {
                       </p>
                     ) : null}
                     <p className="map-toolbar-meta">
-                      Selection multiple: Shift+clic ou bouton "Selection zone".
+                      Selection multiple: Shift+clic ou clique-glisse avec "Selection zone".
                     </p>
                     {isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">
@@ -3783,7 +3787,7 @@ function App() {
                       </button>
                     </div>
                     <p className="map-toolbar-meta">
-                      Shift+clic ajoute/retire un element de la selection.
+                      Shift+clic ajoute/retire un element. Zone: clique-glisse.
                     </p>
                   </>
                 )}
@@ -3864,6 +3868,7 @@ function App() {
           maxBounds={METROPOLE_BOUNDS}
           maxBoundsViscosity={1}
           doubleClickZoom={!isMapInteractionCaptureEnabled}
+          dragging={!isZoneSelectionMode}
           attributionControl={false}
           className="map"
         >
