@@ -2,11 +2,15 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import dotenv from 'dotenv'
 
 const require = createRequire(import.meta.url)
 const osmtogeojson = require('osmtogeojson')
 
 const ROOT_DIR = path.resolve(process.cwd())
+dotenv.config({ path: path.resolve(ROOT_DIR, '.env.local') })
+dotenv.config({ path: path.resolve(ROOT_DIR, '.env') })
+
 const OUTPUT_FILE = path.resolve(ROOT_DIR, 'src/data/layers.generated.ts')
 const OUTPUT_JSON_FILE = path.resolve(ROOT_DIR, 'data/osm-layers.json')
 const BBOX = process.env.OSM_BBOX || '43.02,4.95,43.62,5.86'

@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 
 const ROOT_DIR = path.resolve(process.cwd())
 const INPUT_JSON_FILE = path.resolve(ROOT_DIR, 'data/osm-layers.json')
+dotenv.config({ path: path.resolve(ROOT_DIR, '.env.local') })
+dotenv.config({ path: path.resolve(ROOT_DIR, '.env') })
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
