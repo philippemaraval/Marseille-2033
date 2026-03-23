@@ -265,11 +265,24 @@ interface PersistedUiStateV1 {
     string,
     { minZoom: number; maxZoom: number }
   >
+  layerOpacityByKey?: Record<string, number>
   viewBookmarks?: ViewBookmark[]
+  isNorthArrowVisible?: boolean
   mapView?: {
     center: LatLngTuple
     zoom: number
   } | null
+}
+
+interface SharedUrlState {
+  center?: LatLngTuple
+  zoom?: number
+  baseMapId?: BaseMapId
+  statusFilter?: StatusId | 'all'
+  categoryFilter?: string | 'all'
+  geometryFilter?: DrawGeometry | 'all'
+  activeLayerIds?: string[]
+  selectedFeatureId?: string | null
 }
 
 const MARSEILLE_CENTER: LatLngTuple = [43.2965, 5.3698]
@@ -698,6 +711,10 @@ function normalizeLineWidth(value: number): number {
 
 function normalizeFillOpacity(value: number): number {
   return Math.max(0.05, Math.min(0.95, value))
+}
+
+function normalizeLayerOpacity(value: number): number {
+  return Math.round(clamp(value, 0.15, 1) * 100) / 100
 }
 
 function normalizeLabelSize(value: number): number {
@@ -1359,6 +1376,107 @@ function parseLayerZoomVisibility(
   return result
 }
 
+function parseLayerOpacityByKey(value: unknown): Record<string, number> {
+  if (!isObjectRecord(value)) {
+    return {}
+  }
+  const result: Record<string, number> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    const parsed = parseFiniteNumber(entry)
+    if (parsed === null) {
+      continue
+    }
+    result[key] = normalizeLayerOpacity(parsed)
+  }
+  return result
+}
+
+function parseSharedUrlState(search: string): SharedUrlState | null {
+  if (!search || search.trim().length === 0) {
+    return null
+  }
+  const params = new URLSearchParams(search)
+  const state: SharedUrlState = {}
+
+  const lat = parseFiniteNumber(
+    params.has('lat') ? Number.parseFloat(params.get('lat') ?? '') : null,
+  )
+  const lng = parseFiniteNumber(
+    params.has('lng') ? Number.parseFloat(params.get('lng') ?? '') : null,
+  )
+  const zoom = parseFiniteNumber(
+    params.has('z') ? Number.parseFloat(params.get('z') ?? '') : null,
+  )
+  if (lat !== null && lng !== null) {
+    const parsedCenter = parseLatLngTuple([lat, lng])
+    if (parsedCenter) {
+      state.center = clampPointToMetropole(parsedCenter)
+    }
+  }
+  if (zoom !== null) {
+    state.zoom = clamp(zoom, 10, 18)
+  }
+
+  const baseMapValue = params.get('b')
+  if (
+    baseMapValue === 'osm' ||
+    baseMapValue === 'satellite' ||
+    baseMapValue === 'carto_light' ||
+    baseMapValue === 'carto_dark' ||
+    baseMapValue === 'topo'
+  ) {
+    state.baseMapId = baseMapValue
+  }
+
+  const statusValue = params.get('st')
+  if (
+    statusValue === 'all' ||
+    statusValue === 'existant' ||
+    statusValue === 'en cours' ||
+    statusValue === 'propose'
+  ) {
+    state.statusFilter = statusValue
+  }
+
+  const categoryValue = params.get('cat')
+  if (categoryValue !== null) {
+    const trimmed = categoryValue.trim()
+    state.categoryFilter = trimmed.length > 0 ? trimmed : 'all'
+  }
+
+  const geometryValue = params.get('geo')
+  if (
+    geometryValue === 'all' ||
+    geometryValue === 'point' ||
+    geometryValue === 'line' ||
+    geometryValue === 'polygon'
+  ) {
+    state.geometryFilter = geometryValue
+  }
+
+  const activeLayersValue = params.get('al')
+  if (activeLayersValue) {
+    state.activeLayerIds = parseStringArray(activeLayersValue.split(','))
+  }
+
+  const selectedFeatureId = params.get('sid')
+  if (selectedFeatureId !== null) {
+    const trimmed = selectedFeatureId.trim()
+    state.selectedFeatureId = trimmed.length > 0 ? trimmed : null
+  }
+
+  const hasData =
+    state.center !== undefined ||
+    state.zoom !== undefined ||
+    state.baseMapId !== undefined ||
+    state.statusFilter !== undefined ||
+    state.categoryFilter !== undefined ||
+    state.geometryFilter !== undefined ||
+    state.activeLayerIds !== undefined ||
+    state.selectedFeatureId !== undefined
+  return hasData ? state : null
+}
+
 function parseCoordinateQuery(value: string): LatLngTuple | null {
   const normalized = value
     .trim()
@@ -1995,10 +2113,12 @@ function App() {
   const [layerZoomVisibility, setLayerZoomVisibility] = useState<
     Record<string, { minZoom: number; maxZoom: number }>
   >({})
+  const [layerOpacityByKey, setLayerOpacityByKey] = useState<Record<string, number>>({})
   const [mapSearchQuery, setMapSearchQuery] = useState('')
   const [mapSearchResults, setMapSearchResults] = useState<MapSearchCandidate[]>([])
   const [isSearchingMap, setIsSearchingMap] = useState(false)
   const [mapSearchNotice, setMapSearchNotice] = useState<string | null>(null)
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [searchFocusPoint, setSearchFocusPoint] = useState<LatLngTuple | null>(null)
   const [bookmarkDraftName, setBookmarkDraftName] = useState('')
   const [viewBookmarks, setViewBookmarks] = useState<ViewBookmark[]>([])
@@ -2038,6 +2158,8 @@ function App() {
   const [snapToleranceMeters, setSnapToleranceMeters] = useState(20)
   const [snapPreview, setSnapPreview] = useState<SnapPreviewState | null>(null)
   const [isGridEnabled, setIsGridEnabled] = useState(false)
+  const [isNorthArrowVisible, setIsNorthArrowVisible] = useState(true)
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
   const [mapViewport, setMapViewport] = useState<{
     center: LatLngTuple
     zoom: number
@@ -2230,6 +2352,12 @@ function App() {
   }, [syncSupabaseLayers])
 
   useEffect(() => {
+    if (!isAdmin) {
+      setIsShortcutHelpOpen(false)
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
     if (hasHydratedUiStateRef.current || typeof window === 'undefined') {
       return
     }
@@ -2270,6 +2398,9 @@ function App() {
         setLayerZoomVisibility(
           parseLayerZoomVisibility(persisted.layerZoomVisibility),
         )
+      }
+      if (persisted.layerOpacityByKey !== undefined) {
+        setLayerOpacityByKey(parseLayerOpacityByKey(persisted.layerOpacityByKey))
       }
       if (persisted.viewBookmarks !== undefined) {
         setViewBookmarks(parseViewBookmarks(persisted.viewBookmarks))
@@ -2408,6 +2539,10 @@ function App() {
       if (persistedGrid !== null) {
         setIsGridEnabled(persistedGrid)
       }
+      const persistedNorthArrow = parseBooleanValue(persisted.isNorthArrowVisible)
+      if (persistedNorthArrow !== null) {
+        setIsNorthArrowVisible(persistedNorthArrow)
+      }
 
       if (persisted.localHistoryPast !== undefined) {
         setLocalHistoryPast(parseLocalHistoryEntries(persisted.localHistoryPast))
@@ -2423,6 +2558,44 @@ function App() {
         const nextMapView = parsePersistedMapView(persisted.mapView)
         persistedMapViewRef.current = nextMapView
         pendingMapViewRestoreRef.current = nextMapView
+      }
+
+      const sharedState = parseSharedUrlState(window.location.search)
+      if (sharedState) {
+        if (sharedState.baseMapId) {
+          setBaseMapId(sharedState.baseMapId)
+        }
+        if (sharedState.statusFilter) {
+          setStatusFilter(sharedState.statusFilter)
+        }
+        if (sharedState.categoryFilter !== undefined) {
+          setCategoryFilter(sharedState.categoryFilter)
+        }
+        if (sharedState.geometryFilter) {
+          setGeometryFilter(sharedState.geometryFilter)
+        }
+        if (sharedState.activeLayerIds !== undefined) {
+          const activeIdSet = new Set(sharedState.activeLayerIds)
+          setActiveLayers((current) =>
+            Object.fromEntries(
+              Object.keys(current).map((layerId) => [layerId, activeIdSet.has(layerId)]),
+            ),
+          )
+        }
+        if (Object.prototype.hasOwnProperty.call(sharedState, 'selectedFeatureId')) {
+          setSelectedFeatureId(sharedState.selectedFeatureId ?? null)
+          if (sharedState.selectedFeatureId) {
+            setSelectedFeatureIds([sharedState.selectedFeatureId])
+          }
+        }
+        if (sharedState.center && sharedState.zoom !== undefined) {
+          const nextMapView = {
+            center: sharedState.center,
+            zoom: sharedState.zoom,
+          }
+          persistedMapViewRef.current = nextMapView
+          pendingMapViewRestoreRef.current = nextMapView
+        }
       }
     } catch {
       window.localStorage.removeItem(UI_STATE_STORAGE_KEY)
@@ -2496,7 +2669,9 @@ function App() {
       lockedLayers,
       collapsedLayerFolders,
       layerZoomVisibility,
+      layerOpacityByKey,
       viewBookmarks,
+      isNorthArrowVisible,
       mapView: mapView ?? null,
     }
 
@@ -2525,9 +2700,11 @@ function App() {
     isLabelOverlayEnabled,
     isLabelCollisionEnabled,
     isMeasureMode,
+    isNorthArrowVisible,
     isRedrawingEditGeometry,
     isSnappingEnabled,
     labelMinZoom,
+    layerOpacityByKey,
     layerZoomVisibility,
     lockedLayers,
     localHistoryFuture,
@@ -2769,6 +2946,24 @@ function App() {
     })
   }, [layers])
 
+  useEffect(() => {
+    setLayerOpacityByKey((current) => {
+      const validKeys = new Set(
+        layers.map((layer) => toLayerLockKey(layer.category, layer.id)),
+      )
+      let changed = false
+      const next: Record<string, number> = {}
+      for (const [key, value] of Object.entries(current)) {
+        if (!validKeys.has(key)) {
+          changed = true
+          continue
+        }
+        next[key] = normalizeLayerOpacity(value)
+      }
+      return changed ? next : current
+    })
+  }, [layers])
+
   const featureById = useMemo(() => {
     const lookup = new Map<string, FeatureRef>()
     for (const layer of layers) {
@@ -2788,6 +2983,12 @@ function App() {
     (category: string, layerId: string) =>
       Boolean(lockedLayers[toLayerLockKey(category, layerId)]),
     [lockedLayers],
+  )
+
+  const getLayerOpacity = useCallback(
+    (category: string, layerId: string) =>
+      layerOpacityByKey[toLayerLockKey(category, layerId)] ?? 1,
+    [layerOpacityByKey],
   )
 
   const selectedFeature = useMemo(
@@ -3098,6 +3299,29 @@ function App() {
     }))
   }
 
+  const handleLayerOpacityChange = useCallback(
+    (category: string, layerId: string, value: number) => {
+      const key = toLayerLockKey(category, layerId)
+      setLayerOpacityByKey((current) => ({
+        ...current,
+        [key]: normalizeLayerOpacity(value),
+      }))
+    },
+    [],
+  )
+
+  const handleResetLayerOpacity = useCallback((category: string, layerId: string) => {
+    const key = toLayerLockKey(category, layerId)
+    setLayerOpacityByKey((current) => {
+      if (current[key] === undefined) {
+        return current
+      }
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }, [])
+
   const handleLayerZoomChange = useCallback(
     (
       category: string,
@@ -3147,6 +3371,18 @@ function App() {
     }))
   }, [])
 
+  const handleExpandAllLayerFolders = useCallback(() => {
+    setCollapsedLayerFolders((current) =>
+      Object.fromEntries(Object.keys(current).map((category) => [category, false])),
+    )
+  }, [])
+
+  const handleCollapseAllLayerFolders = useCallback(() => {
+    setCollapsedLayerFolders((current) =>
+      Object.fromEntries(Object.keys(current).map((category) => [category, true])),
+    )
+  }, [])
+
   const toggleLayerLock = useCallback(
     (category: string, layerId: string) => {
       const key = toLayerLockKey(category, layerId)
@@ -3186,6 +3422,23 @@ function App() {
   const handleDeactivateAllLayers = useCallback(() => {
     setActiveLayers(Object.fromEntries(layers.map((layer) => [layer.id, false])))
   }, [layers])
+
+  const handleSoloLayer = useCallback(
+    (category: string, layerId: string) => {
+      const targetLayer = layers.find(
+        (layer) => layer.id === layerId && layer.category === category,
+      )
+      setActiveLayers(
+        Object.fromEntries(
+          layers.map((layer) => [layer.id, layer.id === layerId && layer.category === category]),
+        ),
+      )
+      if (targetLayer) {
+        setAdminNotice(`Mode solo active: ${targetLayer.label}.`)
+      }
+    },
+    [layers],
+  )
 
   const focusFeatureById = useCallback(
     (
@@ -3497,6 +3750,99 @@ function App() {
   const handleDeleteViewBookmark = useCallback((bookmarkId: string) => {
     setViewBookmarks((current) => current.filter((bookmark) => bookmark.id !== bookmarkId))
   }, [])
+
+  const buildCurrentShareUrl = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return null
+    }
+    const sourceView =
+      mapViewport ??
+      persistedMapViewRef.current ?? {
+        center: MARSEILLE_CENTER,
+        zoom: 12,
+        bounds: METROPOLE_BOUNDS as [LatLngTuple, LatLngTuple],
+      }
+
+    const url = new URL(window.location.href)
+    const params = new URLSearchParams()
+    params.set('lat', sourceView.center[0].toFixed(6))
+    params.set('lng', sourceView.center[1].toFixed(6))
+    params.set('z', clamp(sourceView.zoom, 10, 18).toFixed(2))
+    params.set('b', baseMapId)
+    params.set('st', statusFilter)
+    params.set('cat', categoryFilter)
+    params.set('geo', geometryFilter)
+
+    const activeLayerIds = Object.entries(activeLayers)
+      .filter(([, isActive]) => isActive)
+      .map(([layerId]) => layerId)
+    if (activeLayerIds.length > 0) {
+      params.set('al', activeLayerIds.join(','))
+    }
+    if (selectedFeatureId) {
+      params.set('sid', selectedFeatureId)
+    }
+
+    url.search = params.toString()
+    return url.toString()
+  }, [
+    activeLayers,
+    baseMapId,
+    categoryFilter,
+    geometryFilter,
+    mapViewport,
+    selectedFeatureId,
+    statusFilter,
+  ])
+
+  const handleCopyPermalink = useCallback(async () => {
+    const url = buildCurrentShareUrl()
+    if (!url) {
+      setNavigationNotice('Lien non disponible.')
+      return
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+        setNavigationNotice('Lien de vue copie dans le presse-papiers.')
+        return
+      }
+      setNavigationNotice(`Lien: ${url}`)
+    } catch {
+      setNavigationNotice(`Lien: ${url}`)
+    }
+  }, [buildCurrentShareUrl])
+
+  const handleCopyCursorCoordinates = useCallback(async () => {
+    if (!cursorPosition) {
+      setNavigationNotice('Survole la carte pour copier des coordonnees.')
+      return
+    }
+    const text = `${cursorPosition[0].toFixed(6)}, ${cursorPosition[1].toFixed(6)}`
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        setNavigationNotice(`Coordonnees copiees: ${text}`)
+        return
+      }
+      setNavigationNotice(text)
+    } catch {
+      setNavigationNotice(text)
+    }
+  }, [cursorPosition])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !hasHydratedUiStateRef.current) {
+      return
+    }
+    const nextUrl = buildCurrentShareUrl()
+    if (!nextUrl) {
+      return
+    }
+    if (window.location.href !== nextUrl) {
+      window.history.replaceState(null, '', nextUrl)
+    }
+  }, [buildCurrentShareUrl])
 
   const handleVisibleFeatureFocus = useCallback(
     (featureId: string) => {
@@ -5550,6 +5896,11 @@ function App() {
         handleToggleSnapping()
         return
       }
+      if (key === '?') {
+        event.preventDefault()
+        setIsShortcutHelpOpen((current) => !current)
+        return
+      }
       if (key === '1') {
         event.preventDefault()
         handleToolbarToolClick('create', 'point')
@@ -5639,6 +5990,11 @@ function App() {
       }
 
       if (event.key === 'Escape') {
+        if (isShortcutHelpOpen) {
+          event.preventDefault()
+          setIsShortcutHelpOpen(false)
+          return
+        }
         if (adminMode === 'create' && createPoints.length > 0) {
           event.preventDefault()
           setCreatePoints([])
@@ -5703,6 +6059,7 @@ function App() {
     isAdmin,
     isMeasureMode,
     isRedrawingEditGeometry,
+    isShortcutHelpOpen,
     isZoneSelectionMode,
     measurePoints.length,
     selectedFeature,
@@ -6001,6 +6358,7 @@ function App() {
 
   const renderLayerFeatures = (layer: LayerConfig) => {
     const layerLocked = isLayerLocked(layer.category, layer.id)
+    const layerOpacity = getLayerOpacity(layer.category, layer.id)
     return layer.features
       .filter((feature) => isFeatureVisibleByFilters(feature))
       .flatMap((feature) => {
@@ -6054,6 +6412,7 @@ function App() {
                   textShadow: styleDraft.labelHalo
                     ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff'
                     : 'none',
+                  opacity: clamp(layerOpacity + 0.1, 0.3, 1),
                 }}
               >
                 {feature.name}
@@ -6086,7 +6445,12 @@ function App() {
                 pathOptions={{
                   color: isSelected ? '#0f172a' : feature.color,
                   fillColor: feature.color,
-                  fillOpacity: isSelected ? 0.95 : 0.85,
+                  opacity: clamp(layerOpacity + (isSelected ? 0.18 : 0), 0.15, 1),
+                  fillOpacity: clamp(
+                    (isSelected ? 0.95 : 0.85) * layerOpacity,
+                    0.1,
+                    1,
+                  ),
                   weight: isSelected ? 3 : 2,
                 }}
               >
@@ -6101,6 +6465,7 @@ function App() {
               position={feature.position}
               icon={makePointIcon(styleDraft.pointIcon, feature.color, isSelected, radius)}
               eventHandlers={eventHandlers}
+              opacity={clamp(layerOpacity + (isSelected ? 0.15 : 0), 0.2, 1)}
             >
               {popup}
               {hoverLabelTooltip}
@@ -6129,7 +6494,7 @@ function App() {
                   1,
                   14,
                 ),
-                opacity: 0.9,
+                opacity: clamp(0.9 * layerOpacity + (isSelected ? 0.14 : 0), 0.14, 1),
                 dashArray: lineDashArray,
               }}
             >
@@ -6144,6 +6509,7 @@ function App() {
                 position={anchor.position}
                 icon={makeLineArrowIcon(feature.color, anchor.angle)}
                 interactive={false}
+                opacity={clamp(layerOpacity + (isSelected ? 0.1 : 0), 0.2, 1)}
               />,
             )
           }
@@ -6186,7 +6552,8 @@ function App() {
               color: feature.color,
               weight: borderWeight,
               fillColor: feature.color,
-              fillOpacity,
+              opacity: clamp(layerOpacity + (isSelected ? 0.12 : 0), 0.16, 1),
+              fillOpacity: clamp(fillOpacity * layerOpacity, 0.05, 1),
               dashArray: polygonDashArray,
             }}
           >
@@ -6203,7 +6570,7 @@ function App() {
               pathOptions={{
                 color: '#0f172a',
                 weight: clamp(borderWeight + 2, 1, 14),
-                opacity: 0.24,
+                opacity: clamp(0.24 * layerOpacity, 0.08, 0.8),
               }}
             />,
           )
@@ -6296,6 +6663,7 @@ function App() {
       labelHalo: boolean
       labelPriority: number
       labelMode: 'auto' | 'always'
+      opacity: number
     }
     if (!isLabelOverlayActive) {
       return [] as LabelEntry[]
@@ -6316,6 +6684,7 @@ function App() {
         labelHalo: style.labelHalo,
         labelPriority: normalizeLabelPriority(style.labelPriority),
         labelMode: style.labelMode === 'always' ? 'always' : 'auto',
+        opacity: getLayerOpacity(entry.category, entry.layerId),
       })
     }
     candidates.sort((left, right) => right.labelPriority - left.labelPriority)
@@ -6342,10 +6711,42 @@ function App() {
     return accepted
   }, [
     currentMapZoom,
+    getLayerOpacity,
     isLabelCollisionEnabled,
     isLabelOverlayActive,
     mapVisibleFeatureEntries,
   ])
+
+  const mapScaleHud = useMemo(() => {
+    if (!mapViewport) {
+      return null
+    }
+    const latitude = mapViewport.center[0]
+    const zoom = mapViewport.zoom
+    const metersPerPixel =
+      (Math.cos((latitude * Math.PI) / 180) * 2 * Math.PI * 6_378_137) /
+      (256 * Math.pow(2, zoom))
+    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0) {
+      return null
+    }
+    const targetPixelWidth = 96
+    const maxMeters = metersPerPixel * targetPixelWidth
+    const candidates = [
+      20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000,
+    ]
+    let pickedMeters = candidates[0]
+    for (const candidate of candidates) {
+      if (candidate <= maxMeters) {
+        pickedMeters = candidate
+      }
+    }
+    const widthPx = clamp(pickedMeters / metersPerPixel, 34, 128)
+    const label =
+      pickedMeters >= 1000
+        ? `${Number.isInteger(pickedMeters / 1000) ? pickedMeters / 1000 : (pickedMeters / 1000).toFixed(1)} km`
+        : `${pickedMeters} m`
+    return { widthPx, label }
+  }, [mapViewport])
 
   return (
     <div className="app-shell">
@@ -7417,7 +7818,23 @@ function App() {
             >
               Cadrer selection
             </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={() => void handleCopyPermalink()}
+            >
+              Copier lien
+            </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={() => void handleCopyCursorCoordinates()}
+              disabled={!cursorPosition}
+            >
+              Copier coord.
+            </button>
           </div>
+          {navigationNotice ? <p className="muted">{navigationNotice}</p> : null}
           <p className="muted">
             Curseur:{' '}
             {cursorPosition
@@ -7533,6 +7950,20 @@ function App() {
             >
               Tout desactiver
             </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleExpandAllLayerFolders}
+            >
+              Deplier categories
+            </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleCollapseAllLayerFolders}
+            >
+              Replier categories
+            </button>
           </div>
           {layersByCategory.map((block) => (
             <div key={block.category} className="layer-group">
@@ -7559,6 +7990,8 @@ function App() {
                       maxZoom: 18,
                     }
                     const hasCustomZoomRule = layerZoomVisibility[layerZoomKey] !== undefined
+                    const layerOpacity = layerOpacityByKey[layerZoomKey] ?? 1
+                    const hasCustomOpacity = layerOpacityByKey[layerZoomKey] !== undefined
                     return (
                       <div
                         key={layer.id}
@@ -7577,6 +8010,14 @@ function App() {
                         </label>
                         {isAdmin ? (
                           <div className="layer-order-actions">
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() => handleSoloLayer(block.category, layer.id)}
+                              title="Activer uniquement ce calque"
+                            >
+                              Solo
+                            </button>
                             <button
                               type="button"
                               className="ghost-button mini-button"
@@ -7668,6 +8109,34 @@ function App() {
                             title="Reinitialiser min/max zoom"
                           >
                             Auto
+                          </button>
+                        </div>
+                        <div className="layer-opacity-controls">
+                          <label>
+                            Opacite {Math.round(layerOpacity * 100)}%
+                            <input
+                              type="range"
+                              min={15}
+                              max={100}
+                              step={5}
+                              value={Math.round(layerOpacity * 100)}
+                              onChange={(event) =>
+                                handleLayerOpacityChange(
+                                  block.category,
+                                  layer.id,
+                                  Number.parseInt(event.target.value || '100', 10) / 100,
+                                )
+                              }
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="ghost-button mini-button"
+                            onClick={() => handleResetLayerOpacity(block.category, layer.id)}
+                            disabled={!hasCustomOpacity}
+                            title="Reinitialiser opacite du calque"
+                          >
+                            100%
                           </button>
                         </div>
                       </div>
@@ -7803,8 +8272,17 @@ function App() {
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
             <p className="map-toolbar-shortcuts">
-              Raccourcis: 1/2/3, E, D, R, Z, M, G, X, Shift+clic, Entrer, Retour, Esc, Ctrl/Cmd+Z/Y
+              Raccourcis: 1/2/3, E, D, R, Z, M, G, X, ?, Shift+clic, Entrer, Retour, Esc, Ctrl/Cmd+Z/Y
             </p>
+            <div className="map-toolbar-actions map-toolbar-actions-inline">
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={() => setIsShortcutHelpOpen((current) => !current)}
+              >
+                {isShortcutHelpOpen ? 'Fermer aide' : 'Aide raccourcis'}
+              </button>
+            </div>
 
             {adminMode === 'create' ? (
               <div className="map-toolbar-section">
@@ -8099,6 +8577,14 @@ function App() {
                   title="Eviter le chevauchement des labels"
                 >
                   {isLabelCollisionEnabled ? 'Collision ON' : 'Collision OFF'}
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-button mini-button${isNorthArrowVisible ? ' active' : ''}`}
+                  onClick={() => setIsNorthArrowVisible((current) => !current)}
+                  title="Afficher le nord sur la carte"
+                >
+                  {isNorthArrowVisible ? 'Nord ON' : 'Nord OFF'}
                 </button>
               </div>
 
@@ -8539,6 +9025,20 @@ function App() {
             </div>
           </div>
         ) : null}
+        {mapScaleHud ? (
+          <div className="map-scale-hud" aria-hidden="true">
+            {isNorthArrowVisible ? (
+              <div className="map-north-arrow">
+                <span className="map-north-arrow-letter">N</span>
+                <span className="map-north-arrow-glyph">▲</span>
+              </div>
+            ) : null}
+            <div className="map-scale-bar-shell">
+              <span className="map-scale-bar" style={{ width: `${mapScaleHud.widthPx}px` }} />
+              <span className="map-scale-label">{mapScaleHud.label}</span>
+            </div>
+          </div>
+        ) : null}
         <div className="map-cursor-hud" aria-live="polite">
           <span>Zoom {currentMapZoom.toFixed(1)}</span>
           <span>
@@ -8547,6 +9047,51 @@ function App() {
               : 'Survole pour lire les coordonnees'}
           </span>
         </div>
+        {isAdmin && isShortcutHelpOpen ? (
+          <div
+            className="shortcut-help-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Aide des raccourcis"
+            onClick={() => setIsShortcutHelpOpen(false)}
+          >
+            <div
+              className="shortcut-help-panel"
+              onClick={(event: ReactMouseEvent<HTMLDivElement>) => {
+                event.stopPropagation()
+              }}
+            >
+              <p className="shortcut-help-title">Raccourcis clavier</p>
+              <ul className="shortcut-help-list">
+                <li><kbd>1</kbd> Point</li>
+                <li><kbd>2</kbd> Ligne</li>
+                <li><kbd>3</kbd> Polygone</li>
+                <li><kbd>E</kbd> Mode edition</li>
+                <li><kbd>D</kbd> Mode suppression</li>
+                <li><kbd>R</kbd> Redessiner (edition)</li>
+                <li><kbd>Z</kbd> Selection par zone</li>
+                <li><kbd>M</kbd> Outil mesure</li>
+                <li><kbd>G</kbd> Grille</li>
+                <li><kbd>X</kbd> Snapping</li>
+                <li><kbd>?</kbd> Ouvrir/fermer cette aide</li>
+                <li><kbd>Enter</kbd> Valider</li>
+                <li><kbd>Backspace</kbd> Annuler point</li>
+                <li><kbd>Esc</kbd> Quitter/annuler</li>
+                <li><kbd>Ctrl/Cmd+Z</kbd> Undo local</li>
+                <li><kbd>Ctrl/Cmd+Y</kbd> Redo local</li>
+              </ul>
+              <div className="shortcut-help-actions">
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={() => setIsShortcutHelpOpen(false)}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {isAdmin && isGuidedDrawing && guideGeometry ? (
           <div className="map-drawing-hud" role="status" aria-live="polite">
             <p className="map-drawing-hud-title">{drawingGuideTitle}</p>
@@ -8690,6 +9235,7 @@ function App() {
                     textShadow: entry.labelHalo
                       ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff'
                       : 'none',
+                    opacity: clamp(entry.opacity + 0.1, 0.25, 1),
                   }}
                 >
                   {entry.name}

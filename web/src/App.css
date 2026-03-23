@@ -156,6 +156,26 @@
   font-size: 12px;
 }
 
+.layer-opacity-controls {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.layer-opacity-controls label {
+  flex: 1 1 auto;
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.layer-opacity-controls input {
+  width: 100%;
+}
+
 .radio-grid {
   display: grid;
   gap: 8px;
@@ -711,6 +731,10 @@
   gap: 6px;
 }
 
+.map-toolbar-actions-inline {
+  margin-top: -2px;
+}
+
 .map-history-list {
   list-style: none;
   margin: 0;
@@ -755,6 +779,128 @@
   font-size: 11px;
   color: #334155;
   font-weight: 600;
+}
+
+.map-scale-hud {
+  position: absolute;
+  left: 12px;
+  bottom: 72px;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.map-north-arrow {
+  border: 1px solid rgba(119, 146, 179, 0.48);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 16px rgba(19, 40, 68, 0.14);
+  width: 32px;
+  height: 42px;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  line-height: 1;
+}
+
+.map-north-arrow-letter {
+  font-size: 11px;
+  font-weight: 800;
+  color: #304f74;
+}
+
+.map-north-arrow-glyph {
+  font-size: 12px;
+  color: #1d4ed8;
+}
+
+.map-scale-bar-shell {
+  border: 1px solid rgba(119, 146, 179, 0.48);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 16px rgba(19, 40, 68, 0.14);
+  padding: 6px 8px;
+  display: grid;
+  gap: 3px;
+}
+
+.map-scale-bar {
+  display: block;
+  height: 6px;
+  border: 1px solid rgba(24, 54, 90, 0.92);
+  border-radius: 4px;
+  background: linear-gradient(90deg, #1d4ed8 0%, #60a5fa 100%);
+  min-width: 34px;
+}
+
+.map-scale-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #304f74;
+}
+
+.shortcut-help-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(15, 23, 42, 0.28);
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+.shortcut-help-panel {
+  width: min(420px, 100%);
+  border: 1px solid rgba(120, 145, 178, 0.52);
+  border-radius: 14px;
+  background: linear-gradient(170deg, rgba(255, 255, 255, 0.98), rgba(244, 250, 255, 0.94));
+  box-shadow: 0 20px 36px rgba(18, 37, 63, 0.28);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.shortcut-help-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1a3f67;
+}
+
+.shortcut-help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.shortcut-help-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.shortcut-help-list kbd {
+  min-width: 84px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid rgba(121, 145, 177, 0.6);
+  border-radius: 6px;
+  background: rgba(235, 244, 254, 0.82);
+  color: #27496f;
+  padding: 2px 6px;
+}
+
+.shortcut-help-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .map-drawing-hud {
@@ -1022,6 +1168,11 @@
   .map-cursor-hud {
     left: 10px;
     bottom: 10px;
+  }
+
+  .map-scale-hud {
+    left: 10px;
+    bottom: 66px;
   }
 
   .map-toolbar-row {
