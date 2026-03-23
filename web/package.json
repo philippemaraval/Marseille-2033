@@ -8,9 +8,11 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "import:osm": "node ./scripts/import-osm-v1.mjs"
+    "import:osm": "node ./scripts/import-osm-v1.mjs",
+    "push:osm:supabase": "node ./scripts/push-osm-to-supabase.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.99.3",
     "leaflet": "^1.9.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

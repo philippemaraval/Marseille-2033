@@ -8,6 +8,7 @@ const osmtogeojson = require('osmtogeojson')
 
 const ROOT_DIR = path.resolve(process.cwd())
 const OUTPUT_FILE = path.resolve(ROOT_DIR, 'src/data/layers.generated.ts')
+const OUTPUT_JSON_FILE = path.resolve(ROOT_DIR, 'data/osm-layers.json')
 const BBOX = process.env.OSM_BBOX || '43.02,4.95,43.62,5.86'
 const DEFAULT_OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
@@ -455,21 +456,34 @@ async function main() {
   }
 
   const now = new Date().toISOString()
+  const payload = {
+    generatedAt: now,
+    bbox: BBOX,
+    overpassUrl: OVERPASS_URLS.join(','),
+    layers,
+  }
   const content = [
     "import type { LayerConfig } from '../types/map'",
     '',
     `export const osmImportMeta = ${JSON.stringify(
-      { generatedAt: now, bbox: BBOX, overpassUrl: OVERPASS_URLS.join(',') },
+      {
+        generatedAt: payload.generatedAt,
+        bbox: payload.bbox,
+        overpassUrl: payload.overpassUrl,
+      },
       null,
       2,
     )} as const`,
     '',
-    `export const osmLayers: LayerConfig[] = ${JSON.stringify(layers, null, 2)}`,
+    `export const osmLayers: LayerConfig[] = ${JSON.stringify(payload.layers, null, 2)}`,
     '',
   ].join('\n')
 
+  await fs.mkdir(path.dirname(OUTPUT_JSON_FILE), { recursive: true })
+  await fs.writeFile(OUTPUT_JSON_FILE, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
   await fs.writeFile(OUTPUT_FILE, content, 'utf8')
   console.log(`OSM import done -> ${OUTPUT_FILE}`)
+  console.log(`OSM import json -> ${OUTPUT_JSON_FILE}`)
 }
 
 main().catch((error) => {

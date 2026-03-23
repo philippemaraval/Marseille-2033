@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { LatLngBoundsExpression, LatLngTuple } from 'leaflet'
 import {
   CircleMarker,
@@ -8,7 +8,9 @@ import {
   Popup,
   TileLayer,
 } from 'react-leaflet'
-import { layerMeta, layers } from './data/layers'
+import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
+import { layerMeta, layers as fallbackLayers } from './data/layers'
+import { hasSupabase } from './lib/supabase'
 import type { LayerConfig, StatusId } from './types/map'
 import './App.css'
 
@@ -77,18 +79,61 @@ const STATUS_COLORS: Record<StatusId, string> = {
 
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
+  const [dataSource, setDataSource] = useState(layerMeta.mode)
+  const [sourceTimestamp, setSourceTimestamp] = useState(layerMeta.generatedAt)
+  const [dataNotice, setDataNotice] = useState<string | null>(null)
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState(hasSupabase)
+  const [layers, setLayers] = useState<LayerConfig[]>(fallbackLayers)
   const [activeLayers, setActiveLayers] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(layers.map((layer) => [layer.id, false])),
+    Object.fromEntries(fallbackLayers.map((layer) => [layer.id, false])),
   )
   const [statusFilter, setStatusFilter] = useState<StatusId | 'all'>('all')
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
+
+  useEffect(() => {
+    if (!hasSupabase) {
+      return
+    }
+
+    let isMounted = true
+    const sync = async () => {
+      const result = await fetchLayersFromSupabase()
+      if (!isMounted) {
+        return
+      }
+
+      if (result.ok && result.layers.length > 0) {
+        setLayers(result.layers)
+        setActiveLayers((current) =>
+          Object.fromEntries(
+            result.layers.map((layer) => [layer.id, current[layer.id] ?? false]),
+          ),
+        )
+        setDataSource('supabase')
+        setSourceTimestamp(new Date().toISOString())
+        setDataNotice(null)
+      } else if (result.ok) {
+        setDataSource(`${layerMeta.mode} (fallback)`)
+        setDataNotice('Supabase est configure mais la table map_features est vide.')
+      } else {
+        setDataSource(`${layerMeta.mode} (fallback)`)
+        setDataNotice(`Erreur Supabase: ${result.error}`)
+      }
+      setIsSyncingSupabase(false)
+    }
+
+    void sync()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const categories = useMemo(
     () =>
       Array.from(new Set(layers.map((layer) => layer.category))).sort((a, b) =>
         a.localeCompare(b, 'fr'),
       ),
-    [],
+    [layers],
   )
 
   const visibleLayers = useMemo(
@@ -102,7 +147,7 @@ function App() {
         }
         return layer.category === categoryFilter
       }),
-    [activeLayers, categoryFilter],
+    [layers, activeLayers, categoryFilter],
   )
 
   const visibleFeatures = useMemo<VisibleFeature[]>(
@@ -146,7 +191,7 @@ function App() {
         category,
         layers: layers.filter((layer) => layer.category === category),
       })),
-    [categories],
+    [categories, layers],
   )
 
   const toggleLayer = (id: string) => {
@@ -236,8 +281,12 @@ function App() {
           <p className="kicker">Marseille 2033</p>
           <h1>Plateforme carte - V1</h1>
           <p className="intro">
-            Donnees source: {layerMeta.mode} ({layerMeta.generatedAt})
+            Donnees source: {dataSource} ({sourceTimestamp})
           </p>
+          {isSyncingSupabase ? (
+            <p className="muted">Synchronisation Supabase en cours...</p>
+          ) : null}
+          {dataNotice ? <p className="muted">{dataNotice}</p> : null}
         </header>
 
         <section className="panel-block">
