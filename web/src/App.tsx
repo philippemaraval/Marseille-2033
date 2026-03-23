@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ChangeEvent,
   FormEvent,
@@ -130,6 +130,7 @@ interface MapClickCaptureProps {
 
 interface MapViewportCaptureProps {
   onViewportChange: (viewport: {
+    center: LatLngTuple
     zoom: number
     bounds: [LatLngTuple, LatLngTuple]
   }) => void
@@ -175,10 +176,52 @@ interface LocalHistoryEntry {
   createdAt: number
 }
 
+interface PersistedUiStateV1 {
+  version: 1
+  updatedAt: string
+  baseMapId?: BaseMapId
+  activeLayers?: Record<string, boolean>
+  statusFilter?: StatusId | 'all'
+  categoryFilter?: string | 'all'
+  geometryFilter?: DrawGeometry | 'all'
+  featureSearchQuery?: string
+  featureSortMode?: VisibleFeatureSortMode
+  isLabelOverlayEnabled?: boolean
+  labelMinZoom?: number
+  isAdminPanelOpen?: boolean
+  showDebugInfo?: boolean
+  adminEmail?: string
+  adminMode?: AdminMode
+  selectedFeatureId?: string | null
+  selectedFeatureIds?: string[]
+  createDraft?: Partial<CreateDraft>
+  createPoints?: LatLngTuple[]
+  editDraft?: Partial<EditDraft> | null
+  editPoints?: LatLngTuple[]
+  importDraft?: Partial<ImportDraft>
+  isRedrawingEditGeometry?: boolean
+  isMeasureMode?: boolean
+  measureGeometry?: MeasureGeometry
+  measurePoints?: LatLngTuple[]
+  isSnappingEnabled?: boolean
+  snapToleranceMeters?: number
+  isGridEnabled?: boolean
+  localHistoryPast?: LocalHistoryEntry[]
+  localHistoryFuture?: LocalHistoryEntry[]
+  mapView?: {
+    center: LatLngTuple
+    zoom: number
+  } | null
+}
+
 const MARSEILLE_CENTER: LatLngTuple = [43.2965, 5.3698]
+const METROPOLE_LAT_MIN = 43.02
+const METROPOLE_LAT_MAX = 43.62
+const METROPOLE_LNG_MIN = 4.95
+const METROPOLE_LNG_MAX = 5.86
 const METROPOLE_BOUNDS: LatLngBoundsExpression = [
-  [43.02, 4.95],
-  [43.62, 5.86],
+  [METROPOLE_LAT_MIN, METROPOLE_LNG_MIN],
+  [METROPOLE_LAT_MAX, METROPOLE_LNG_MAX],
 ]
 
 const BASE_MAPS: Record<BaseMapId, BaseMapConfig> = {
@@ -263,6 +306,7 @@ const MEASURE_GEOMETRY_LABELS: Record<MeasureGeometry, string> = {
 const DEFAULT_POINT_RADIUS = 6
 const DEFAULT_LINE_WIDTH = 3
 const DEFAULT_POLYGON_FILL_OPACITY = 0.2
+const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 
 const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
   id: string
@@ -451,7 +495,9 @@ function MapViewportCapture({
   const map = useMapEvents({
     moveend() {
       const bounds = map.getBounds()
+      const center = map.getCenter()
       onViewportChange({
+        center: [center.lat, center.lng],
         zoom: map.getZoom(),
         bounds: [
           [bounds.getSouth(), bounds.getWest()],
@@ -461,7 +507,9 @@ function MapViewportCapture({
     },
     zoomend() {
       const bounds = map.getBounds()
+      const center = map.getCenter()
       onViewportChange({
+        center: [center.lat, center.lng],
         zoom: map.getZoom(),
         bounds: [
           [bounds.getSouth(), bounds.getWest()],
@@ -480,7 +528,9 @@ function MapViewportCapture({
   useEffect(() => {
     onMapReady?.(map)
     const bounds = map.getBounds()
+    const center = map.getCenter()
     onViewportChange({
+      center: [center.lat, center.lng],
       zoom: map.getZoom(),
       bounds: [
         [bounds.getSouth(), bounds.getWest()],
@@ -620,6 +670,291 @@ function buildDefaultImportDraft(layerList: LayerConfig[]): ImportDraft {
     layerLabel: firstLayer?.label ?? 'Import manuel',
     defaultStatus: 'propose',
     defaultColor: STATUS_COLORS.propose,
+  }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const cleaned = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+  return Array.from(new Set(cleaned))
+}
+
+function parseLatLngTuple(value: unknown): LatLngTuple | null {
+  if (!Array.isArray(value) || value.length !== 2) {
+    return null
+  }
+  const lat = value[0]
+  const lng = value[1]
+  if (
+    typeof lat !== 'number' ||
+    !Number.isFinite(lat) ||
+    typeof lng !== 'number' ||
+    !Number.isFinite(lng)
+  ) {
+    return null
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return null
+  }
+  return [lat, lng]
+}
+
+function parseLatLngTupleArray(value: unknown): LatLngTuple[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const points: LatLngTuple[] = []
+  for (const item of value) {
+    const point = parseLatLngTuple(item)
+    if (point) {
+      points.push(point)
+    }
+  }
+  return points
+}
+
+function clampPointToMetropole(point: LatLngTuple): LatLngTuple {
+  return [
+    clamp(point[0], METROPOLE_LAT_MIN, METROPOLE_LAT_MAX),
+    clamp(point[1], METROPOLE_LNG_MIN, METROPOLE_LNG_MAX),
+  ]
+}
+
+function parsePersistedMapView(value: unknown): { center: LatLngTuple; zoom: number } | null {
+  if (!isObjectRecord(value)) {
+    return null
+  }
+  const center = parseLatLngTuple(value.center)
+  const zoomRaw = value.zoom
+  if (!center || typeof zoomRaw !== 'number' || !Number.isFinite(zoomRaw)) {
+    return null
+  }
+  return {
+    center: clampPointToMetropole(center),
+    zoom: clamp(zoomRaw, 10, 18),
+  }
+}
+
+function parseStatusValue(value: unknown, fallback: StatusId): StatusId {
+  if (value === 'existant' || value === 'en cours' || value === 'propose') {
+    return value
+  }
+  return fallback
+}
+
+function parseDrawGeometryValue(value: unknown, fallback: DrawGeometry): DrawGeometry {
+  if (value === 'point' || value === 'line' || value === 'polygon') {
+    return value
+  }
+  return fallback
+}
+
+function parseMeasureGeometryValue(
+  value: unknown,
+  fallback: MeasureGeometry,
+): MeasureGeometry {
+  if (value === 'line' || value === 'polygon') {
+    return value
+  }
+  return fallback
+}
+
+function parseAdminModeValue(value: unknown, fallback: AdminMode): AdminMode {
+  if (value === 'view' || value === 'create' || value === 'edit' || value === 'delete') {
+    return value
+  }
+  return fallback
+}
+
+function parseFeatureSortModeValue(
+  value: unknown,
+  fallback: VisibleFeatureSortMode,
+): VisibleFeatureSortMode {
+  if (
+    value === 'alpha' ||
+    value === 'status' ||
+    value === 'layer' ||
+    value === 'category'
+  ) {
+    return value
+  }
+  return fallback
+}
+
+function parseBaseMapIdValue(value: unknown, fallback: BaseMapId): BaseMapId {
+  if (
+    value === 'osm' ||
+    value === 'satellite' ||
+    value === 'carto_light' ||
+    value === 'carto_dark' ||
+    value === 'topo'
+  ) {
+    return value
+  }
+  return fallback
+}
+
+function parseBooleanRecord(value: unknown): Record<string, boolean> | null {
+  if (!isObjectRecord(value)) {
+    return null
+  }
+  const entries: Array<[string, boolean]> = []
+  for (const [key, entryValue] of Object.entries(value)) {
+    if (typeof key === 'string' && typeof entryValue === 'boolean') {
+      entries.push([key, entryValue])
+    }
+  }
+  return Object.fromEntries(entries)
+}
+
+function parseBooleanValue(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  return null
+}
+
+function parseFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  return null
+}
+
+function parseTextValue(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+  return value
+}
+
+function parseHexColorValue(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && isHexColor(value)) {
+    return value
+  }
+  return fallback
+}
+
+function parseLocalHistoryEntries(value: unknown): LocalHistoryEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const entries: LocalHistoryEntry[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) {
+      continue
+    }
+    const snapshot = isObjectRecord(item.snapshot) ? item.snapshot : null
+    if (!snapshot) {
+      continue
+    }
+
+    const label =
+      typeof item.label === 'string' && item.label.trim().length > 0
+        ? item.label
+        : 'Action'
+    const createdAt =
+      typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+        ? item.createdAt
+        : Date.now()
+
+    entries.push({
+      label,
+      createdAt,
+      snapshot: {
+        createPoints: parseLatLngTupleArray(snapshot.createPoints),
+        editPoints: parseLatLngTupleArray(snapshot.editPoints),
+        measurePoints: parseLatLngTupleArray(snapshot.measurePoints),
+      },
+    })
+  }
+
+  return entries.slice(-60)
+}
+
+function hydrateCreateDraftFromPartial(
+  value: unknown,
+  fallback: CreateDraft,
+): CreateDraft {
+  if (!isObjectRecord(value)) {
+    return fallback
+  }
+
+  const geometry = parseDrawGeometryValue(value.geometry, fallback.geometry)
+  const styleDraft = resolveDraftStyle(geometry, {
+    pointRadius: parseFiniteNumber(value.pointRadius) ?? fallback.pointRadius,
+    lineWidth: parseFiniteNumber(value.lineWidth) ?? fallback.lineWidth,
+    fillOpacity: parseFiniteNumber(value.fillOpacity) ?? fallback.fillOpacity,
+  })
+
+  return {
+    name: parseTextValue(value.name, fallback.name),
+    status: parseStatusValue(value.status, fallback.status),
+    color: parseHexColorValue(value.color, fallback.color),
+    category: parseTextValue(value.category, fallback.category),
+    layerId: parseTextValue(value.layerId, fallback.layerId),
+    layerLabel: parseTextValue(value.layerLabel, fallback.layerLabel),
+    geometry,
+    pointRadius: styleDraft.pointRadius,
+    lineWidth: styleDraft.lineWidth,
+    fillOpacity: styleDraft.fillOpacity,
+  }
+}
+
+function hydrateEditDraftFromPartial(value: unknown): EditDraft | null {
+  if (value === null) {
+    return null
+  }
+  if (!isObjectRecord(value)) {
+    return null
+  }
+
+  const geometry = parseDrawGeometryValue(value.geometry, 'point')
+  const styleDraft = resolveDraftStyle(geometry, {
+    pointRadius: parseFiniteNumber(value.pointRadius) ?? DEFAULT_POINT_RADIUS,
+    lineWidth: parseFiniteNumber(value.lineWidth) ?? DEFAULT_LINE_WIDTH,
+    fillOpacity:
+      parseFiniteNumber(value.fillOpacity) ?? DEFAULT_POLYGON_FILL_OPACITY,
+  })
+
+  return {
+    name: parseTextValue(value.name, ''),
+    status: parseStatusValue(value.status, 'propose'),
+    color: parseHexColorValue(value.color, STATUS_COLORS.propose),
+    category: parseTextValue(value.category, ''),
+    layerId: parseTextValue(value.layerId, ''),
+    layerLabel: parseTextValue(value.layerLabel, ''),
+    geometry,
+    pointRadius: styleDraft.pointRadius,
+    lineWidth: styleDraft.lineWidth,
+    fillOpacity: styleDraft.fillOpacity,
+  }
+}
+
+function hydrateImportDraftFromPartial(
+  value: unknown,
+  fallback: ImportDraft,
+): ImportDraft {
+  if (!isObjectRecord(value)) {
+    return fallback
+  }
+  return {
+    category: parseTextValue(value.category, fallback.category),
+    layerId: parseTextValue(value.layerId, fallback.layerId),
+    layerLabel: parseTextValue(value.layerLabel, fallback.layerLabel),
+    defaultStatus: parseStatusValue(value.defaultStatus, fallback.defaultStatus),
+    defaultColor: parseHexColorValue(value.defaultColor, fallback.defaultColor),
   }
 }
 
@@ -967,6 +1302,7 @@ function App() {
   const [snapPreview, setSnapPreview] = useState<SnapPreviewState | null>(null)
   const [isGridEnabled, setIsGridEnabled] = useState(false)
   const [mapViewport, setMapViewport] = useState<{
+    center: LatLngTuple
     zoom: number
     bounds: [LatLngTuple, LatLngTuple]
   } | null>(null)
@@ -991,12 +1327,20 @@ function App() {
   const [isTrashLoading, setIsTrashLoading] = useState(false)
   const [versionItems, setVersionItems] = useState<FeatureVersion[]>([])
   const [isVersionsLoading, setIsVersionsLoading] = useState(false)
+  const hasHydratedUiStateRef = useRef(false)
+  const persistedMapViewRef = useRef<{ center: LatLngTuple; zoom: number } | null>(
+    null,
+  )
+  const pendingMapViewRestoreRef = useRef<{
+    center: LatLngTuple
+    zoom: number
+  } | null>(null)
 
   const isDrawingOnMap =
     isAdmin &&
     (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
   const isMapInteractionCaptureEnabled =
-    isDrawingOnMap || isZoneSelectionMode || isMeasureMode
+    isDrawingOnMap || (isAdmin && (isZoneSelectionMode || isMeasureMode))
   const isDirectGeometryEditing =
     isAdmin && adminMode === 'edit' && !isRedrawingEditGeometry
 
@@ -1144,6 +1488,286 @@ function App() {
       window.clearTimeout(timeoutId)
     }
   }, [syncSupabaseLayers])
+
+  useEffect(() => {
+    if (hasHydratedUiStateRef.current || typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      const raw = window.localStorage.getItem(UI_STATE_STORAGE_KEY)
+      if (!raw) {
+        return
+      }
+
+      const parsed = JSON.parse(raw) as unknown
+      if (!isObjectRecord(parsed) || parsed.version !== 1) {
+        return
+      }
+
+      const persisted = parsed as unknown as PersistedUiStateV1
+
+      setBaseMapId((current) => parseBaseMapIdValue(persisted.baseMapId, current))
+
+      const persistedActiveLayers = parseBooleanRecord(persisted.activeLayers)
+      if (persistedActiveLayers) {
+        setActiveLayers((current) => ({
+          ...current,
+          ...persistedActiveLayers,
+        }))
+      }
+
+      const persistedStatusFilter = persisted.statusFilter
+      if (
+        persistedStatusFilter === 'all' ||
+        persistedStatusFilter === 'existant' ||
+        persistedStatusFilter === 'en cours' ||
+        persistedStatusFilter === 'propose'
+      ) {
+        setStatusFilter(persistedStatusFilter)
+      }
+
+      if (
+        persisted.geometryFilter === 'all' ||
+        persisted.geometryFilter === 'point' ||
+        persisted.geometryFilter === 'line' ||
+        persisted.geometryFilter === 'polygon'
+      ) {
+        setGeometryFilter(persisted.geometryFilter)
+      }
+
+      if (typeof persisted.categoryFilter === 'string') {
+        const normalizedCategory = persisted.categoryFilter.trim()
+        setCategoryFilter(
+          normalizedCategory.length > 0
+            ? (normalizedCategory as string | 'all')
+            : 'all',
+        )
+      }
+
+      if (typeof persisted.featureSearchQuery === 'string') {
+        setFeatureSearchQuery(persisted.featureSearchQuery)
+      }
+
+      setFeatureSortMode((current) =>
+        parseFeatureSortModeValue(persisted.featureSortMode, current),
+      )
+
+      const persistedLabelOverlay = parseBooleanValue(persisted.isLabelOverlayEnabled)
+      if (persistedLabelOverlay !== null) {
+        setIsLabelOverlayEnabled(persistedLabelOverlay)
+      }
+
+      const persistedLabelMinZoom = parseFiniteNumber(persisted.labelMinZoom)
+      if (persistedLabelMinZoom !== null) {
+        setLabelMinZoom(Math.round(clamp(persistedLabelMinZoom, 10, 18)))
+      }
+
+      const persistedAdminPanelOpen = parseBooleanValue(persisted.isAdminPanelOpen)
+      if (persistedAdminPanelOpen !== null) {
+        setIsAdminPanelOpen(persistedAdminPanelOpen)
+      }
+
+      const persistedShowDebugInfo = parseBooleanValue(persisted.showDebugInfo)
+      if (persistedShowDebugInfo !== null) {
+        setShowDebugInfo(persistedShowDebugInfo)
+      }
+
+      if (typeof persisted.adminEmail === 'string' && persisted.adminEmail.trim()) {
+        setAdminEmail(persisted.adminEmail.trim())
+      }
+
+      setAdminMode((current) => parseAdminModeValue(persisted.adminMode, current))
+
+      if (persisted.selectedFeatureId === null) {
+        setSelectedFeatureId(null)
+      } else if (typeof persisted.selectedFeatureId === 'string') {
+        const normalizedSelected = persisted.selectedFeatureId.trim()
+        setSelectedFeatureId(normalizedSelected.length > 0 ? normalizedSelected : null)
+      }
+
+      if (persisted.selectedFeatureIds !== undefined) {
+        setSelectedFeatureIds(parseStringArray(persisted.selectedFeatureIds))
+      }
+
+      if (persisted.createDraft !== undefined) {
+        setCreateDraft((current) =>
+          hydrateCreateDraftFromPartial(persisted.createDraft, current),
+        )
+      }
+      if (persisted.createPoints !== undefined) {
+        setCreatePoints(parseLatLngTupleArray(persisted.createPoints))
+      }
+
+      if (persisted.editDraft !== undefined) {
+        setEditDraft(hydrateEditDraftFromPartial(persisted.editDraft))
+      }
+      if (persisted.editPoints !== undefined) {
+        setEditPoints(parseLatLngTupleArray(persisted.editPoints))
+      }
+
+      if (persisted.importDraft !== undefined) {
+        setImportDraft((current) =>
+          hydrateImportDraftFromPartial(persisted.importDraft, current),
+        )
+      }
+
+      const persistedRedraw = parseBooleanValue(persisted.isRedrawingEditGeometry)
+      if (persistedRedraw !== null) {
+        setIsRedrawingEditGeometry(persistedRedraw)
+      }
+
+      const persistedMeasureMode = parseBooleanValue(persisted.isMeasureMode)
+      if (persistedMeasureMode !== null) {
+        setIsMeasureMode(persistedMeasureMode)
+      }
+
+      setMeasureGeometry((current) =>
+        parseMeasureGeometryValue(persisted.measureGeometry, current),
+      )
+
+      if (persisted.measurePoints !== undefined) {
+        setMeasurePoints(parseLatLngTupleArray(persisted.measurePoints))
+      }
+
+      const persistedSnapping = parseBooleanValue(persisted.isSnappingEnabled)
+      if (persistedSnapping !== null) {
+        setIsSnappingEnabled(persistedSnapping)
+      }
+
+      const persistedSnapTolerance = parseFiniteNumber(persisted.snapToleranceMeters)
+      if (persistedSnapTolerance !== null) {
+        setSnapToleranceMeters(Math.round(clamp(persistedSnapTolerance, 5, 500)))
+      }
+
+      const persistedGrid = parseBooleanValue(persisted.isGridEnabled)
+      if (persistedGrid !== null) {
+        setIsGridEnabled(persistedGrid)
+      }
+
+      if (persisted.localHistoryPast !== undefined) {
+        setLocalHistoryPast(parseLocalHistoryEntries(persisted.localHistoryPast))
+      }
+      if (persisted.localHistoryFuture !== undefined) {
+        setLocalHistoryFuture(parseLocalHistoryEntries(persisted.localHistoryFuture))
+      }
+
+      const hasMapView =
+        Object.prototype.hasOwnProperty.call(persisted, 'mapView') ||
+        persisted.mapView === null
+      if (hasMapView) {
+        const nextMapView = parsePersistedMapView(persisted.mapView)
+        persistedMapViewRef.current = nextMapView
+        pendingMapViewRestoreRef.current = nextMapView
+      }
+    } catch {
+      window.localStorage.removeItem(UI_STATE_STORAGE_KEY)
+    } finally {
+      hasHydratedUiStateRef.current = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!mapInstance) {
+      return
+    }
+    const mapView = pendingMapViewRestoreRef.current
+    if (!mapView) {
+      return
+    }
+    mapInstance.setView(mapView.center, mapView.zoom, { animate: false })
+    pendingMapViewRestoreRef.current = null
+  }, [mapInstance])
+
+  useEffect(() => {
+    if (!hasHydratedUiStateRef.current || typeof window === 'undefined') {
+      return
+    }
+
+    const mapView =
+      mapViewport !== null
+        ? {
+            center: [mapViewport.center[0], mapViewport.center[1]] as LatLngTuple,
+            zoom: mapViewport.zoom,
+          }
+        : persistedMapViewRef.current
+
+    if (mapView) {
+      persistedMapViewRef.current = mapView
+    }
+
+    const payload: PersistedUiStateV1 = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      baseMapId,
+      activeLayers,
+      statusFilter,
+      categoryFilter,
+      geometryFilter,
+      featureSearchQuery,
+      featureSortMode,
+      isLabelOverlayEnabled,
+      labelMinZoom,
+      isAdminPanelOpen,
+      showDebugInfo,
+      adminEmail,
+      adminMode,
+      selectedFeatureId,
+      selectedFeatureIds,
+      createDraft,
+      createPoints,
+      editDraft,
+      editPoints,
+      importDraft,
+      isRedrawingEditGeometry,
+      isMeasureMode,
+      measureGeometry,
+      measurePoints,
+      isSnappingEnabled,
+      snapToleranceMeters,
+      isGridEnabled,
+      localHistoryPast,
+      localHistoryFuture,
+      mapView: mapView ?? null,
+    }
+
+    try {
+      window.localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(payload))
+    } catch {
+      // Ignore storage quota/private mode errors.
+    }
+  }, [
+    activeLayers,
+    adminEmail,
+    adminMode,
+    baseMapId,
+    categoryFilter,
+    createDraft,
+    createPoints,
+    editDraft,
+    editPoints,
+    featureSearchQuery,
+    featureSortMode,
+    geometryFilter,
+    importDraft,
+    isAdminPanelOpen,
+    isGridEnabled,
+    isLabelOverlayEnabled,
+    isMeasureMode,
+    isRedrawingEditGeometry,
+    isSnappingEnabled,
+    labelMinZoom,
+    localHistoryFuture,
+    localHistoryPast,
+    mapViewport,
+    measureGeometry,
+    measurePoints,
+    selectedFeatureId,
+    selectedFeatureIds,
+    showDebugInfo,
+    snapToleranceMeters,
+    statusFilter,
+  ])
 
   const categories = useMemo(
     () =>
@@ -5105,7 +5729,7 @@ function App() {
       </aside>
 
       <main
-        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isZoneSelectionMode ? ' is-zone-selecting' : ''}${isMeasureMode ? ' is-measuring' : ''}`}
+        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isAdmin && isZoneSelectionMode ? ' is-zone-selecting' : ''}${isAdmin && isMeasureMode ? ' is-measuring' : ''}`}
       >
         {isAdmin ? (
           <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
@@ -5716,7 +6340,7 @@ function App() {
           maxBounds={METROPOLE_BOUNDS}
           maxBoundsViscosity={1}
           doubleClickZoom={!isMapInteractionCaptureEnabled}
-          dragging={!isZoneSelectionMode}
+          dragging={!(isAdmin && isZoneSelectionMode)}
           attributionControl={false}
           className="map"
         >
@@ -5783,7 +6407,7 @@ function App() {
             </CircleMarker>
           ))}
           {renderDraftGeometry()}
-          {isMeasureMode && measurePoints.length > 0 ? (
+          {isAdmin && isMeasureMode && measurePoints.length > 0 ? (
             measureGeometry === 'polygon' ? (
               measurePoints.length >= 3 ? (
                 <Polygon
@@ -5820,7 +6444,7 @@ function App() {
               />
             )
           ) : null}
-          {zoneSelectionBounds ? (
+          {isAdmin && zoneSelectionBounds ? (
             <Rectangle
               bounds={zoneSelectionBounds}
               interactive={false}
@@ -5833,7 +6457,7 @@ function App() {
               }}
             />
           ) : null}
-          {isSnappingEnabled && snapPreview ? (
+          {isAdmin && isSnappingEnabled && snapPreview ? (
             <CircleMarker
               center={snapPreview.position}
               radius={6}
