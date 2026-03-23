@@ -95,6 +95,8 @@ interface ImportDraft {
 interface MapClickCaptureProps {
   enabled: boolean
   onMapClick: (position: LatLngTuple) => void
+  onMapDoubleClick?: () => void
+  onMapContextMenu?: () => void
 }
 
 interface SupabaseKeyMetadata {
@@ -172,22 +174,42 @@ const MIN_POINTS_REQUIRED: Record<DrawGeometry, number> = {
   polygon: 3,
 }
 
+const DRAW_GEOMETRY_LABELS: Record<DrawGeometry, string> = {
+  point: 'point',
+  line: 'ligne',
+  polygon: 'polygone',
+}
+
 const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
   id: string
   label: string
+  hotkey: string
   mode: AdminMode
   geometry?: DrawGeometry
 }> = [
-  { id: 'tool-create-point', label: 'Point', mode: 'create', geometry: 'point' },
-  { id: 'tool-create-line', label: 'Ligne', mode: 'create', geometry: 'line' },
+  {
+    id: 'tool-create-point',
+    label: 'Point',
+    hotkey: '1',
+    mode: 'create',
+    geometry: 'point',
+  },
+  {
+    id: 'tool-create-line',
+    label: 'Ligne',
+    hotkey: '2',
+    mode: 'create',
+    geometry: 'line',
+  },
   {
     id: 'tool-create-polygon',
     label: 'Polygone',
+    hotkey: '3',
     mode: 'create',
     geometry: 'polygon',
   },
-  { id: 'tool-edit', label: 'Deplacer', mode: 'edit' },
-  { id: 'tool-delete', label: 'Supprimer', mode: 'delete' },
+  { id: 'tool-edit', label: 'Deplacer', hotkey: 'E', mode: 'edit' },
+  { id: 'tool-delete', label: 'Supprimer', hotkey: 'D', mode: 'delete' },
 ]
 
 function extractProjectRefFromUrl(value: string | undefined): string | null {
@@ -275,13 +297,32 @@ function fingerprintToken(value: string | undefined): string {
   return `${value.slice(0, 10)}...${value.slice(-6)}`
 }
 
-function MapClickCapture({ enabled, onMapClick }: MapClickCaptureProps) {
+function MapClickCapture({
+  enabled,
+  onMapClick,
+  onMapDoubleClick,
+  onMapContextMenu,
+}: MapClickCaptureProps) {
   useMapEvents({
     click(event) {
       if (!enabled) {
         return
       }
       onMapClick([event.latlng.lat, event.latlng.lng])
+    },
+    dblclick(event) {
+      if (!enabled || !onMapDoubleClick) {
+        return
+      }
+      event.originalEvent.preventDefault()
+      onMapDoubleClick()
+    },
+    contextmenu(event) {
+      if (!enabled || !onMapContextMenu) {
+        return
+      }
+      event.originalEvent.preventDefault()
+      onMapContextMenu()
     },
   })
 
@@ -390,6 +431,17 @@ function downloadTextFile(
   URL.revokeObjectURL(url)
 }
 
+function isInputLikeElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+  if (target.isContentEditable) {
+    return true
+  }
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select'
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -433,6 +485,10 @@ function App() {
   const [isTrashLoading, setIsTrashLoading] = useState(false)
   const [versionItems, setVersionItems] = useState<FeatureVersion[]>([])
   const [isVersionsLoading, setIsVersionsLoading] = useState(false)
+
+  const isDrawingOnMap =
+    isAdmin &&
+    (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
 
   const supabaseEnvDiagnostic = useMemo(() => {
     const urlValue = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -878,9 +934,14 @@ function App() {
     const layerLabel = createDraft.layerLabel.trim()
     const category = createDraft.category.trim()
     const name = createDraft.name.trim()
+    const finalName =
+      name ||
+      `Element ${new Date().toLocaleString('fr-FR', {
+        hour12: false,
+      })}`
 
-    if (!name || !category || !layerLabel || !layerId) {
-      setAdminNotice('Nom, categorie et calque sont obligatoires.')
+    if (!category || !layerLabel || !layerId) {
+      setAdminNotice('Categorie et calque sont obligatoires.')
       return
     }
 
@@ -918,7 +979,7 @@ function App() {
 
     const { error } = await supabase.from('map_features').insert({
       id,
-      name,
+      name: finalName,
       status: createDraft.status,
       category,
       layer_id: layerId,
@@ -940,7 +1001,7 @@ function App() {
     setCreatePoints([])
     setSelectedFeatureId(id)
     setEditDraft({
-      name,
+      name: finalName,
       status: createDraft.status,
       color: createDraft.color,
       category,
@@ -1059,6 +1120,103 @@ function App() {
     await refreshTrash()
     setIsSaving(false)
     setAdminNotice('Element deplace dans la corbeille.')
+  }
+
+  const handleMapDoubleClick = () => {
+    if (!isAdmin) {
+      return
+    }
+
+    if (adminMode === 'create') {
+      if (!isGeometryComplete(createDraft.geometry, createPoints)) {
+        setAdminNotice(
+          `Geometrie incomplete: ${MIN_POINTS_REQUIRED[createDraft.geometry]} point(s) minimum.`,
+        )
+        return
+      }
+      void handleCreateFeature()
+      return
+    }
+
+    if (adminMode === 'edit' && isRedrawingEditGeometry && editDraft) {
+      if (!isGeometryComplete(editDraft.geometry, editPoints)) {
+        setAdminNotice(
+          `Geometrie incomplete: ${MIN_POINTS_REQUIRED[editDraft.geometry]} point(s) minimum.`,
+        )
+        return
+      }
+      void handleSaveEdition()
+    }
+  }
+
+  const handleMapContextMenu = () => {
+    if (!isAdmin) {
+      return
+    }
+
+    if (adminMode === 'create' && createPoints.length > 0) {
+      setCreatePoints((current) => current.slice(0, -1))
+      return
+    }
+
+    if (adminMode === 'edit' && isRedrawingEditGeometry && editPoints.length > 0) {
+      setEditPoints((current) => current.slice(0, -1))
+    }
+  }
+
+  const handleToolbarToggleRedraw = useCallback(() => {
+    if (!selectedFeature || !editDraft) {
+      setAdminNotice('Selectionne un element sur la carte avant de redessiner.')
+      return
+    }
+
+    if (isRedrawingEditGeometry) {
+      setIsRedrawingEditGeometry(false)
+      setEditPoints(getFeaturePoints(selectedFeature.feature))
+      setAdminNotice(null)
+      return
+    }
+
+    setAdminMode('edit')
+    setIsRedrawingEditGeometry(true)
+    setEditPoints([])
+    setAdminNotice(
+      'Redessin actif: clique sur la carte, puis Entrer pour enregistrer.',
+    )
+  }, [editDraft, isRedrawingEditGeometry, selectedFeature])
+
+  const handleToolbarUndoLastPoint = useCallback(() => {
+    if (adminMode === 'create') {
+      setCreatePoints((current) => current.slice(0, -1))
+      return
+    }
+    if (adminMode === 'edit' && isRedrawingEditGeometry) {
+      setEditPoints((current) => current.slice(0, -1))
+    }
+  }, [adminMode, isRedrawingEditGeometry])
+
+  const handleToolbarClearPoints = useCallback(() => {
+    if (adminMode === 'create') {
+      setCreatePoints([])
+      return
+    }
+    if (adminMode === 'edit' && isRedrawingEditGeometry) {
+      setEditPoints([])
+    }
+  }, [adminMode, isRedrawingEditGeometry])
+
+  const handleToolbarPrimaryAction = () => {
+    if (adminMode === 'create') {
+      void handleCreateFeature()
+      return
+    }
+    if (adminMode === 'edit' && isRedrawingEditGeometry) {
+      void handleSaveEdition()
+      return
+    }
+    if (adminMode === 'delete' && selectedFeatureId) {
+      void handleDeleteFeature()
+    }
   }
 
   const handleRestoreFromTrash = async (featureId: string) => {
@@ -1376,6 +1534,128 @@ function App() {
     }))
   }
 
+  useEffect(() => {
+    if (!isAdmin) {
+      return
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isInputLikeElement(event.target)) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (key === '1') {
+        event.preventDefault()
+        handleToolbarToolClick('create', 'point')
+        return
+      }
+      if (key === '2') {
+        event.preventDefault()
+        handleToolbarToolClick('create', 'line')
+        return
+      }
+      if (key === '3') {
+        event.preventDefault()
+        handleToolbarToolClick('create', 'polygon')
+        return
+      }
+      if (key === 'e') {
+        event.preventDefault()
+        handleToolbarToolClick('edit')
+        return
+      }
+      if (key === 'd') {
+        event.preventDefault()
+        handleToolbarToolClick('delete')
+        return
+      }
+      if (key === 'r' && adminMode === 'edit') {
+        event.preventDefault()
+        handleToolbarToggleRedraw()
+        return
+      }
+
+      if (event.key === 'Backspace') {
+        if (adminMode === 'create' && createPoints.length > 0) {
+          event.preventDefault()
+          handleToolbarUndoLastPoint()
+          return
+        }
+        if (adminMode === 'edit' && isRedrawingEditGeometry && editPoints.length > 0) {
+          event.preventDefault()
+          handleToolbarUndoLastPoint()
+          return
+        }
+      }
+
+      if (event.key === 'Enter') {
+        if (
+          adminMode === 'create' &&
+          isGeometryComplete(createDraft.geometry, createPoints)
+        ) {
+          event.preventDefault()
+          handleToolbarPrimaryAction()
+          return
+        }
+        if (
+          adminMode === 'edit' &&
+          isRedrawingEditGeometry &&
+          editDraft &&
+          isGeometryComplete(editDraft.geometry, editPoints)
+        ) {
+          event.preventDefault()
+          handleToolbarPrimaryAction()
+          return
+        }
+        if (adminMode === 'delete' && selectedFeatureId) {
+          event.preventDefault()
+          handleToolbarPrimaryAction()
+          return
+        }
+      }
+
+      if (event.key === 'Escape') {
+        if (adminMode === 'create' && createPoints.length > 0) {
+          event.preventDefault()
+          setCreatePoints([])
+          return
+        }
+        if (adminMode === 'edit' && isRedrawingEditGeometry) {
+          event.preventDefault()
+          setIsRedrawingEditGeometry(false)
+          if (selectedFeature) {
+            setEditPoints(getFeaturePoints(selectedFeature.feature))
+          }
+          return
+        }
+        if (adminMode !== 'view') {
+          event.preventDefault()
+          setAdminMode('view')
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [
+    adminMode,
+    createDraft.geometry,
+    createPoints,
+    editDraft,
+    editPoints,
+    handleToolbarPrimaryAction,
+    handleToolbarToggleRedraw,
+    handleToolbarToolClick,
+    handleToolbarUndoLastPoint,
+    isAdmin,
+    isRedrawingEditGeometry,
+    selectedFeature,
+    selectedFeatureId,
+  ])
+
   const renderDraftGeometry = () => {
     if (!isAdmin) {
       return null
@@ -1588,6 +1868,50 @@ function App() {
           </Polygon>
         )
       })
+
+  const toolbarPointCount =
+    adminMode === 'create'
+      ? createPoints.length
+      : adminMode === 'edit' && isRedrawingEditGeometry
+        ? editPoints.length
+        : 0
+  const toolbarMinPoints =
+    adminMode === 'create'
+      ? MIN_POINTS_REQUIRED[createDraft.geometry]
+      : adminMode === 'edit' && isRedrawingEditGeometry && editDraft
+        ? MIN_POINTS_REQUIRED[editDraft.geometry]
+        : 0
+  const toolbarCanUndo =
+    adminMode === 'create'
+      ? createPoints.length > 0
+      : adminMode === 'edit' && isRedrawingEditGeometry
+        ? editPoints.length > 0
+        : false
+  const toolbarCanClear =
+    adminMode === 'create'
+      ? createPoints.length > 0
+      : adminMode === 'edit' && isRedrawingEditGeometry
+        ? editPoints.length > 0
+        : false
+  const toolbarCanConfirm =
+    adminMode === 'create'
+      ? isGeometryComplete(createDraft.geometry, createPoints)
+      : adminMode === 'edit' && isRedrawingEditGeometry && editDraft
+        ? isGeometryComplete(editDraft.geometry, editPoints)
+        : adminMode === 'delete'
+          ? Boolean(selectedFeatureId)
+          : false
+
+  const isGuidedDrawing =
+    adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry)
+  const guideGeometry =
+    adminMode === 'create'
+      ? createDraft.geometry
+      : adminMode === 'edit' && isRedrawingEditGeometry && editDraft
+        ? editDraft.geometry
+        : null
+  const drawingGuideTitle =
+    adminMode === 'create' ? 'Creation en cours' : 'Redessin en cours'
 
   return (
     <div className="app-shell">
@@ -2482,7 +2806,7 @@ function App() {
         </section>
       </aside>
 
-      <main className="map-pane">
+      <main className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}`}>
         {isAdmin ? (
           <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
             <p className="map-toolbar-title">Outils carte</p>
@@ -2499,9 +2823,10 @@ function App() {
                     className={`map-tool-button${isActive ? ' active' : ''}`}
                     onClick={() => handleToolbarToolClick(tool.mode, tool.geometry)}
                     aria-pressed={isActive}
-                    title={tool.label}
+                    title={`${tool.label} (${tool.hotkey})`}
                   >
-                    {tool.label}
+                    <span>{tool.label}</span>
+                    <kbd>{tool.hotkey}</kbd>
                   </button>
                 )
               })}
@@ -2509,9 +2834,204 @@ function App() {
             <p className="map-toolbar-hint">
               Mode actif:{' '}
               {adminMode === 'create'
-                ? `Creation ${createDraft.geometry}`
+                ? `Creation ${DRAW_GEOMETRY_LABELS[createDraft.geometry]}`
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
+            <p className="map-toolbar-shortcuts">
+              Raccourcis: 1/2/3, E, D, R, Entrer, Retour, Esc, Double-clic
+            </p>
+
+            {adminMode === 'create' ? (
+              <div className="map-toolbar-section">
+                <label className="map-toolbar-label">
+                  Nom rapide
+                  <input
+                    type="text"
+                    className="map-toolbar-input"
+                    value={createDraft.name}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Nom (sinon automatique)"
+                  />
+                </label>
+                <div className="map-toolbar-row">
+                  <label className="map-toolbar-label small">
+                    Statut
+                    <select
+                      className="map-toolbar-select"
+                      value={createDraft.status}
+                      onChange={(event) =>
+                        setCreateDraft((current) => ({
+                          ...current,
+                          status: event.target.value as StatusId,
+                        }))
+                      }
+                    >
+                      <option value="existant">Existant</option>
+                      <option value="en cours">En cours</option>
+                      <option value="propose">Propose</option>
+                    </select>
+                  </label>
+                  <label className="map-toolbar-label small">
+                    Couleur
+                    <input
+                      type="color"
+                      className="map-toolbar-color"
+                      value={createDraft.color}
+                      onChange={(event) =>
+                        setCreateDraft((current) => ({
+                          ...current,
+                          color: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <p className="map-toolbar-meta">
+                  Points: {toolbarPointCount} / {toolbarMinPoints}
+                </p>
+                <div className="map-toolbar-actions">
+                  <button
+                    type="button"
+                    className="ghost-button mini-button"
+                    onClick={handleToolbarUndoLastPoint}
+                    disabled={!toolbarCanUndo}
+                    title="Annuler dernier point (Retour)"
+                  >
+                    Annuler point
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button mini-button"
+                    onClick={handleToolbarClearPoints}
+                    disabled={!toolbarCanClear}
+                    title="Effacer le dessin (Esc)"
+                  >
+                    Effacer
+                  </button>
+                  <button
+                    type="button"
+                    className="solid-button mini-button"
+                    onClick={handleToolbarPrimaryAction}
+                    disabled={!toolbarCanConfirm || isSaving}
+                    title="Enregistrer (Entrer)"
+                  >
+                    {isSaving ? '...' : 'Enregistrer'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {adminMode === 'edit' ? (
+              <div className="map-toolbar-section">
+                {!selectedFeature || !editDraft ? (
+                  <p className="map-toolbar-meta">
+                    Clique un element sur la carte pour l'editer.
+                  </p>
+                ) : (
+                  <>
+                    <p className="map-toolbar-meta">
+                      Selection: <strong>{selectedFeature.feature.name}</strong>
+                    </p>
+                    <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className={`ghost-button mini-button${isRedrawingEditGeometry ? ' active' : ''}`}
+                        onClick={handleToolbarToggleRedraw}
+                        title="Basculer redessin (R)"
+                      >
+                        {isRedrawingEditGeometry ? 'Arreter redessin' : 'Redessiner'}
+                      </button>
+                      {isRedrawingEditGeometry ? (
+                        <>
+                          <button
+                            type="button"
+                            className="ghost-button mini-button"
+                            onClick={handleToolbarUndoLastPoint}
+                            disabled={!toolbarCanUndo}
+                            title="Annuler dernier point (Retour)"
+                          >
+                            Annuler point
+                          </button>
+                          <button
+                            type="button"
+                            className="solid-button mini-button"
+                            onClick={handleToolbarPrimaryAction}
+                            disabled={!toolbarCanConfirm || isSaving}
+                            title="Enregistrer (Entrer)"
+                          >
+                            {isSaving ? '...' : 'Enregistrer'}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                    {isRedrawingEditGeometry ? (
+                      <p className="map-toolbar-meta">
+                        Redessin: {toolbarPointCount} / {toolbarMinPoints} points
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {adminMode === 'delete' ? (
+              <div className="map-toolbar-section">
+                {!selectedFeature ? (
+                  <p className="map-toolbar-meta">
+                    Clique un element sur la carte pour le supprimer.
+                  </p>
+                ) : (
+                  <>
+                    <p className="map-toolbar-meta">
+                      Selection: <strong>{selectedFeature.feature.name}</strong>
+                    </p>
+                    <button
+                      type="button"
+                      className="danger-button mini-button"
+                      onClick={handleToolbarPrimaryAction}
+                      disabled={!toolbarCanConfirm || isSaving}
+                    >
+                      {isSaving ? '...' : 'Mettre en corbeille'}
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {isAdmin && isGuidedDrawing && guideGeometry ? (
+          <div className="map-drawing-hud" role="status" aria-live="polite">
+            <p className="map-drawing-hud-title">{drawingGuideTitle}</p>
+            <p className="map-drawing-hud-meta">
+              {toolbarPointCount}/{toolbarMinPoints} point(s) pour le{' '}
+              {DRAW_GEOMETRY_LABELS[guideGeometry]}
+            </p>
+            <p className="map-drawing-hud-help">
+              Clic: ajouter | Clic droit: annuler | Double-clic: terminer
+            </p>
+            <div className="map-drawing-hud-actions">
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={handleToolbarUndoLastPoint}
+                disabled={!toolbarCanUndo}
+              >
+                Annuler point
+              </button>
+              <button
+                type="button"
+                className="solid-button mini-button"
+                onClick={handleToolbarPrimaryAction}
+                disabled={!toolbarCanConfirm || isSaving}
+              >
+                {isSaving ? '...' : 'Terminer'}
+              </button>
+            </div>
           </div>
         ) : null}
         <MapContainer
@@ -2521,6 +3041,7 @@ function App() {
           maxZoom={18}
           maxBounds={METROPOLE_BOUNDS}
           maxBoundsViscosity={1}
+          doubleClickZoom={!isDrawingOnMap}
           attributionControl={false}
           className="map"
         >
@@ -2529,12 +3050,10 @@ function App() {
             attribution={BASE_MAPS[baseMapId].attribution}
           />
           <MapClickCapture
-            enabled={
-              isAdmin &&
-              (adminMode === 'create' ||
-                (adminMode === 'edit' && isRedrawingEditGeometry))
-            }
+            enabled={isDrawingOnMap}
             onMapClick={handleMapClick}
+            onMapDoubleClick={handleMapDoubleClick}
+            onMapContextMenu={handleMapContextMenu}
           />
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
           {renderDraftGeometry()}
