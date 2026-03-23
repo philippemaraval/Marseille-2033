@@ -73,9 +73,83 @@ function normalizeStyle(raw: unknown): FeatureStyle | undefined {
     result.fillOpacity = source.fillOpacity
   }
   if (
+    source.pointIcon === 'dot' ||
+    source.pointIcon === 'pin' ||
+    source.pointIcon === 'metro' ||
+    source.pointIcon === 'tram' ||
+    source.pointIcon === 'bus' ||
+    source.pointIcon === 'train' ||
+    source.pointIcon === 'bike' ||
+    source.pointIcon === 'park' ||
+    source.pointIcon === 'star'
+  ) {
+    result.pointIcon = source.pointIcon
+  }
+  if (
+    source.labelMode === 'auto' ||
+    source.labelMode === 'always' ||
+    source.labelMode === 'hover'
+  ) {
+    result.labelMode = source.labelMode
+  }
+  if (typeof source.labelSize === 'number' && Number.isFinite(source.labelSize)) {
+    result.labelSize = source.labelSize
+  }
+  if (typeof source.labelHalo === 'boolean') {
+    result.labelHalo = source.labelHalo
+  }
+  if (
+    typeof source.labelPriority === 'number' &&
+    Number.isFinite(source.labelPriority)
+  ) {
+    result.labelPriority = source.labelPriority
+  }
+  if (
+    source.lineDash === 'solid' ||
+    source.lineDash === 'dashed' ||
+    source.lineDash === 'dotted'
+  ) {
+    result.lineDash = source.lineDash
+  }
+  if (typeof source.lineArrows === 'boolean') {
+    result.lineArrows = source.lineArrows
+  }
+  if (
+    source.lineDirection === 'none' ||
+    source.lineDirection === 'forward' ||
+    source.lineDirection === 'both'
+  ) {
+    result.lineDirection = source.lineDirection
+  }
+  if (
+    source.polygonPattern === 'none' ||
+    source.polygonPattern === 'diagonal' ||
+    source.polygonPattern === 'cross' ||
+    source.polygonPattern === 'dots'
+  ) {
+    result.polygonPattern = source.polygonPattern
+  }
+  if (
+    source.polygonBorderMode === 'normal' ||
+    source.polygonBorderMode === 'inner' ||
+    source.polygonBorderMode === 'outer'
+  ) {
+    result.polygonBorderMode = source.polygonBorderMode
+  }
+  if (
     result.pointRadius === undefined &&
     result.lineWidth === undefined &&
-    result.fillOpacity === undefined
+    result.fillOpacity === undefined &&
+    result.pointIcon === undefined &&
+    result.labelMode === undefined &&
+    result.labelSize === undefined &&
+    result.labelHalo === undefined &&
+    result.labelPriority === undefined &&
+    result.lineDash === undefined &&
+    result.lineArrows === undefined &&
+    result.lineDirection === undefined &&
+    result.polygonPattern === undefined &&
+    result.polygonBorderMode === undefined
   ) {
     return undefined
   }

@@ -1,9 +1,36 @@
 export type StatusId = 'existant' | 'en cours' | 'propose'
 
+export type PointIconId =
+  | 'dot'
+  | 'pin'
+  | 'metro'
+  | 'tram'
+  | 'bus'
+  | 'train'
+  | 'bike'
+  | 'park'
+  | 'star'
+
+export type LabelMode = 'auto' | 'always' | 'hover'
+export type LineDashStyle = 'solid' | 'dashed' | 'dotted'
+export type LineDirectionMode = 'none' | 'forward' | 'both'
+export type PolygonPattern = 'none' | 'diagonal' | 'cross' | 'dots'
+export type PolygonBorderMode = 'normal' | 'inner' | 'outer'
+
 export interface FeatureStyle {
   pointRadius?: number
   lineWidth?: number
   fillOpacity?: number
+  pointIcon?: PointIconId
+  labelMode?: LabelMode
+  labelSize?: number
+  labelHalo?: boolean
+  labelPriority?: number
+  lineDash?: LineDashStyle
+  lineArrows?: boolean
+  lineDirection?: LineDirectionMode
+  polygonPattern?: PolygonPattern
+  polygonBorderMode?: PolygonBorderMode
 }
 
 export interface BaseFeature {

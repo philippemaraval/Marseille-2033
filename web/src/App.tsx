@@ -3,6 +3,7 @@ import type {
   ChangeEvent,
   FormEvent,
   MouseEvent as ReactMouseEvent,
+  ReactElement,
   ReactNode,
 } from 'react'
 import type {
@@ -51,7 +52,13 @@ import { hasSupabase, supabase } from './lib/supabase'
 import type {
   FeatureStyle,
   GeometryFeature,
+  LabelMode,
   LayerConfig,
+  LineDashStyle,
+  LineDirectionMode,
+  PointIconId,
+  PolygonBorderMode,
+  PolygonPattern,
   StatusId,
 } from './types/map'
 import './App.css'
@@ -95,6 +102,16 @@ interface CreateDraft {
   pointRadius: number
   lineWidth: number
   fillOpacity: number
+  pointIcon: PointIconId
+  labelMode: LabelMode
+  labelSize: number
+  labelHalo: boolean
+  labelPriority: number
+  lineDash: LineDashStyle
+  lineArrows: boolean
+  lineDirection: LineDirectionMode
+  polygonPattern: PolygonPattern
+  polygonBorderMode: PolygonBorderMode
 }
 
 interface EditDraft {
@@ -108,6 +125,16 @@ interface EditDraft {
   pointRadius: number
   lineWidth: number
   fillOpacity: number
+  pointIcon: PointIconId
+  labelMode: LabelMode
+  labelSize: number
+  labelHalo: boolean
+  labelPriority: number
+  lineDash: LineDashStyle
+  lineArrows: boolean
+  lineDirection: LineDirectionMode
+  polygonPattern: PolygonPattern
+  polygonBorderMode: PolygonBorderMode
 }
 
 interface ImportDraft {
@@ -192,6 +219,13 @@ interface ViewBookmark {
   createdAt: number
 }
 
+interface StyleTemplateOption {
+  id: string
+  label: string
+  description: string
+  patch: Partial<CreateDraft>
+}
+
 interface PersistedUiStateV1 {
   version: 1
   updatedAt: string
@@ -203,6 +237,7 @@ interface PersistedUiStateV1 {
   featureSearchQuery?: string
   featureSortMode?: VisibleFeatureSortMode
   isLabelOverlayEnabled?: boolean
+  isLabelCollisionEnabled?: boolean
   labelMinZoom?: number
   isAdminPanelOpen?: boolean
   showDebugInfo?: boolean
@@ -226,6 +261,10 @@ interface PersistedUiStateV1 {
   localHistoryFuture?: LocalHistoryEntry[]
   lockedLayers?: Record<string, boolean>
   collapsedLayerFolders?: Record<string, boolean>
+  layerZoomVisibility?: Record<
+    string,
+    { minZoom: number; maxZoom: number }
+  >
   viewBookmarks?: ViewBookmark[]
   mapView?: {
     center: LatLngTuple
@@ -325,8 +364,73 @@ const MEASURE_GEOMETRY_LABELS: Record<MeasureGeometry, string> = {
 const DEFAULT_POINT_RADIUS = 6
 const DEFAULT_LINE_WIDTH = 3
 const DEFAULT_POLYGON_FILL_OPACITY = 0.2
+const DEFAULT_POINT_ICON: PointIconId = 'dot'
+const DEFAULT_LABEL_MODE: LabelMode = 'auto'
+const DEFAULT_LABEL_SIZE = 13
+const DEFAULT_LABEL_HALO = true
+const DEFAULT_LABEL_PRIORITY = 50
+const DEFAULT_LINE_DASH: LineDashStyle = 'solid'
+const DEFAULT_LINE_ARROWS = false
+const DEFAULT_LINE_DIRECTION: LineDirectionMode = 'none'
+const DEFAULT_POLYGON_PATTERN: PolygonPattern = 'none'
+const DEFAULT_POLYGON_BORDER_MODE: PolygonBorderMode = 'normal'
 const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 const MAX_VIEW_BOOKMARKS = 30
+
+const POINT_ICON_LABELS: Record<PointIconId, string> = {
+  dot: 'Rond',
+  pin: 'Epingle',
+  metro: 'Metro',
+  tram: 'Tram',
+  bus: 'Bus',
+  train: 'Train',
+  bike: 'Velo',
+  park: 'Parc',
+  star: 'Etoile',
+}
+
+const POINT_ICON_GLYPHS: Record<PointIconId, string> = {
+  dot: '•',
+  pin: '📍',
+  metro: 'Ⓜ',
+  tram: '🚋',
+  bus: '🚌',
+  train: '🚆',
+  bike: '🚲',
+  park: '🌳',
+  star: '★',
+}
+
+const LINE_DASH_OPTIONS: Record<LineDashStyle, string> = {
+  solid: 'Continue',
+  dashed: 'Pointillee',
+  dotted: 'Points',
+}
+
+const POLYGON_PATTERN_OPTIONS: Record<PolygonPattern, string> = {
+  none: 'Aucun',
+  diagonal: 'Diagonal',
+  cross: 'Croise',
+  dots: 'Points',
+}
+
+const POLYGON_BORDER_MODE_OPTIONS: Record<PolygonBorderMode, string> = {
+  normal: 'Normal',
+  inner: 'Interieur',
+  outer: 'Exterieur',
+}
+
+const LABEL_MODE_OPTIONS: Record<LabelMode, string> = {
+  auto: 'Auto',
+  always: 'Toujours',
+  hover: 'Survol',
+}
+
+const LINE_DIRECTION_OPTIONS: Record<LineDirectionMode, string> = {
+  none: 'Aucun',
+  forward: 'Sens principal',
+  both: 'Deux sens',
+}
 
 const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
   id: string
@@ -596,10 +700,221 @@ function normalizeFillOpacity(value: number): number {
   return Math.max(0.05, Math.min(0.95, value))
 }
 
+function normalizeLabelSize(value: number): number {
+  return Math.round(Math.max(10, Math.min(24, value)))
+}
+
+function normalizeLabelPriority(value: number): number {
+  return Math.round(Math.max(0, Math.min(100, value)))
+}
+
+function normalizePointIcon(value: unknown): PointIconId {
+  if (
+    value === 'dot' ||
+    value === 'pin' ||
+    value === 'metro' ||
+    value === 'tram' ||
+    value === 'bus' ||
+    value === 'train' ||
+    value === 'bike' ||
+    value === 'park' ||
+    value === 'star'
+  ) {
+    return value
+  }
+  return DEFAULT_POINT_ICON
+}
+
+function normalizeLabelMode(value: unknown): LabelMode {
+  if (value === 'auto' || value === 'always' || value === 'hover') {
+    return value
+  }
+  return DEFAULT_LABEL_MODE
+}
+
+function normalizeLineDash(value: unknown): LineDashStyle {
+  if (value === 'solid' || value === 'dashed' || value === 'dotted') {
+    return value
+  }
+  return DEFAULT_LINE_DASH
+}
+
+function normalizeLineDirection(value: unknown): LineDirectionMode {
+  if (value === 'none' || value === 'forward' || value === 'both') {
+    return value
+  }
+  return DEFAULT_LINE_DIRECTION
+}
+
+function normalizePolygonPattern(value: unknown): PolygonPattern {
+  if (value === 'none' || value === 'diagonal' || value === 'cross' || value === 'dots') {
+    return value
+  }
+  return DEFAULT_POLYGON_PATTERN
+}
+
+function normalizePolygonBorderMode(value: unknown): PolygonBorderMode {
+  if (value === 'normal' || value === 'inner' || value === 'outer') {
+    return value
+  }
+  return DEFAULT_POLYGON_BORDER_MODE
+}
+
+function toDashArray(style: LineDashStyle): string | undefined {
+  if (style === 'dashed') {
+    return '10 6'
+  }
+  if (style === 'dotted') {
+    return '2 8'
+  }
+  return undefined
+}
+
+function buildStatusTemplatePatch(status: StatusId): Partial<CreateDraft> {
+  if (status === 'existant') {
+    return {
+      color: STATUS_COLORS.existant,
+      lineDash: 'solid',
+      fillOpacity: 0.22,
+      labelPriority: 70,
+    }
+  }
+  if (status === 'en cours') {
+    return {
+      color: STATUS_COLORS['en cours'],
+      lineDash: 'dashed',
+      fillOpacity: 0.18,
+      labelPriority: 55,
+    }
+  }
+  return {
+    color: STATUS_COLORS.propose,
+    lineDash: 'dotted',
+    fillOpacity: 0.14,
+    labelPriority: 42,
+  }
+}
+
+function buildCategoryTemplatePatch(category: string): Partial<CreateDraft> {
+  const normalized = normalizeSearchTerm(category)
+  if (normalized.includes('transport')) {
+    return {
+      pointIcon: 'metro',
+      lineWidth: 4,
+      lineDash: 'solid',
+      lineArrows: true,
+      lineDirection: 'forward',
+      labelPriority: 80,
+    }
+  }
+  if (normalized.includes('piste') || normalized.includes('velo')) {
+    return {
+      pointIcon: 'bike',
+      color: '#0f766e',
+      lineDash: 'dashed',
+      lineWidth: 3,
+      labelPriority: 58,
+    }
+  }
+  if (normalized.includes('parc') || normalized.includes('jardin')) {
+    return {
+      pointIcon: 'park',
+      color: '#15803d',
+      fillOpacity: 0.26,
+      polygonPattern: 'dots',
+      polygonBorderMode: 'inner',
+      labelPriority: 52,
+    }
+  }
+  if (normalized.includes('quartier') || normalized.includes('secteur')) {
+    return {
+      color: '#1d4ed8',
+      fillOpacity: 0.13,
+      polygonPattern: 'diagonal',
+      polygonBorderMode: 'outer',
+      labelPriority: 46,
+    }
+  }
+  if (normalized.includes('pieton')) {
+    return {
+      color: '#b45309',
+      polygonPattern: 'cross',
+      fillOpacity: 0.2,
+      lineDash: 'dashed',
+      labelPriority: 48,
+    }
+  }
+  return {
+    labelPriority: 50,
+  }
+}
+
+function normalizeTemplatePatch(patch: Partial<CreateDraft>): Partial<CreateDraft> {
+  const normalized: Partial<CreateDraft> = {}
+  if (typeof patch.color === 'string' && isHexColor(patch.color)) {
+    normalized.color = patch.color
+  }
+  if (typeof patch.pointRadius === 'number' && Number.isFinite(patch.pointRadius)) {
+    normalized.pointRadius = normalizePointRadius(patch.pointRadius)
+  }
+  if (typeof patch.lineWidth === 'number' && Number.isFinite(patch.lineWidth)) {
+    normalized.lineWidth = normalizeLineWidth(patch.lineWidth)
+  }
+  if (typeof patch.fillOpacity === 'number' && Number.isFinite(patch.fillOpacity)) {
+    normalized.fillOpacity = normalizeFillOpacity(patch.fillOpacity)
+  }
+  if (patch.pointIcon !== undefined) {
+    normalized.pointIcon = normalizePointIcon(patch.pointIcon)
+  }
+  if (patch.labelMode !== undefined) {
+    normalized.labelMode = normalizeLabelMode(patch.labelMode)
+  }
+  if (typeof patch.labelSize === 'number' && Number.isFinite(patch.labelSize)) {
+    normalized.labelSize = normalizeLabelSize(patch.labelSize)
+  }
+  if (typeof patch.labelHalo === 'boolean') {
+    normalized.labelHalo = patch.labelHalo
+  }
+  if (typeof patch.labelPriority === 'number' && Number.isFinite(patch.labelPriority)) {
+    normalized.labelPriority = normalizeLabelPriority(patch.labelPriority)
+  }
+  if (patch.lineDash !== undefined) {
+    normalized.lineDash = normalizeLineDash(patch.lineDash)
+  }
+  if (typeof patch.lineArrows === 'boolean') {
+    normalized.lineArrows = patch.lineArrows
+  }
+  if (patch.lineDirection !== undefined) {
+    normalized.lineDirection = normalizeLineDirection(patch.lineDirection)
+  }
+  if (patch.polygonPattern !== undefined) {
+    normalized.polygonPattern = normalizePolygonPattern(patch.polygonPattern)
+  }
+  if (patch.polygonBorderMode !== undefined) {
+    normalized.polygonBorderMode = normalizePolygonBorderMode(patch.polygonBorderMode)
+  }
+  return normalized
+}
+
 function resolveDraftStyle(
   geometry: DrawGeometry,
   style?: FeatureStyle,
-): Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'> {
+): Pick<
+  CreateDraft,
+  | 'pointRadius'
+  | 'lineWidth'
+  | 'fillOpacity'
+  | 'pointIcon'
+  | 'labelMode'
+  | 'labelSize'
+  | 'labelHalo'
+  | 'labelPriority'
+  | 'lineDash'
+  | 'lineArrows'
+  | 'lineDirection'
+  | 'polygonPattern'
+  | 'polygonBorderMode'
+> {
   const pointRadius =
     typeof style?.pointRadius === 'number' && Number.isFinite(style.pointRadius)
       ? style.pointRadius
@@ -612,12 +927,44 @@ function resolveDraftStyle(
     typeof style?.fillOpacity === 'number' && Number.isFinite(style.fillOpacity)
       ? style.fillOpacity
       : DEFAULT_POLYGON_FILL_OPACITY
+  const pointIcon = normalizePointIcon(style?.pointIcon)
+  const labelMode = normalizeLabelMode(style?.labelMode)
+  const labelSize =
+    typeof style?.labelSize === 'number' && Number.isFinite(style.labelSize)
+      ? normalizeLabelSize(style.labelSize)
+      : DEFAULT_LABEL_SIZE
+  const labelHalo =
+    typeof style?.labelHalo === 'boolean' ? style.labelHalo : DEFAULT_LABEL_HALO
+  const labelPriority =
+    typeof style?.labelPriority === 'number' && Number.isFinite(style.labelPriority)
+      ? normalizeLabelPriority(style.labelPriority)
+      : DEFAULT_LABEL_PRIORITY
+  const lineDash = normalizeLineDash(style?.lineDash)
+  const lineArrows =
+    typeof style?.lineArrows === 'boolean' ? style.lineArrows : DEFAULT_LINE_ARROWS
+  const lineDirection = normalizeLineDirection(style?.lineDirection)
+  const polygonPattern = normalizePolygonPattern(style?.polygonPattern)
+  const polygonBorderMode = normalizePolygonBorderMode(style?.polygonBorderMode)
+
+  const shared = {
+    pointIcon,
+    labelMode,
+    labelSize,
+    labelHalo,
+    labelPriority,
+    lineDash,
+    lineArrows,
+    lineDirection,
+    polygonPattern,
+    polygonBorderMode,
+  }
 
   if (geometry === 'point') {
     return {
       pointRadius: normalizePointRadius(pointRadius),
       lineWidth: normalizeLineWidth(2),
       fillOpacity: normalizeFillOpacity(DEFAULT_POLYGON_FILL_OPACITY),
+      ...shared,
     }
   }
 
@@ -626,6 +973,7 @@ function resolveDraftStyle(
       pointRadius: normalizePointRadius(DEFAULT_POINT_RADIUS),
       lineWidth: normalizeLineWidth(lineWidth),
       fillOpacity: normalizeFillOpacity(DEFAULT_POLYGON_FILL_OPACITY),
+      ...shared,
     }
   }
 
@@ -633,26 +981,57 @@ function resolveDraftStyle(
     pointRadius: normalizePointRadius(DEFAULT_POINT_RADIUS),
     lineWidth: normalizeLineWidth(lineWidth),
     fillOpacity: normalizeFillOpacity(fillOpacity),
+    ...shared,
   }
 }
 
 function toFeatureStylePayload(
   geometry: DrawGeometry,
-  draft: Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'>,
+  draft: Pick<
+    CreateDraft,
+    | 'pointRadius'
+    | 'lineWidth'
+    | 'fillOpacity'
+    | 'pointIcon'
+    | 'labelMode'
+    | 'labelSize'
+    | 'labelHalo'
+    | 'labelPriority'
+    | 'lineDash'
+    | 'lineArrows'
+    | 'lineDirection'
+    | 'polygonPattern'
+    | 'polygonBorderMode'
+  >,
 ): FeatureStyle {
+  const base: FeatureStyle = {
+    labelMode: normalizeLabelMode(draft.labelMode),
+    labelSize: normalizeLabelSize(draft.labelSize),
+    labelHalo: Boolean(draft.labelHalo),
+    labelPriority: normalizeLabelPriority(draft.labelPriority),
+  }
   if (geometry === 'point') {
     return {
+      ...base,
       pointRadius: normalizePointRadius(draft.pointRadius),
+      pointIcon: normalizePointIcon(draft.pointIcon),
     }
   }
   if (geometry === 'line') {
     return {
+      ...base,
       lineWidth: normalizeLineWidth(draft.lineWidth),
+      lineDash: normalizeLineDash(draft.lineDash),
+      lineArrows: Boolean(draft.lineArrows),
+      lineDirection: normalizeLineDirection(draft.lineDirection),
     }
   }
   return {
+    ...base,
     lineWidth: normalizeLineWidth(draft.lineWidth),
     fillOpacity: normalizeFillOpacity(draft.fillOpacity),
+    polygonPattern: normalizePolygonPattern(draft.polygonPattern),
+    polygonBorderMode: normalizePolygonBorderMode(draft.polygonBorderMode),
   }
 }
 
@@ -683,6 +1062,16 @@ function buildDefaultDraft(layerList: LayerConfig[]): CreateDraft {
     pointRadius: DEFAULT_POINT_RADIUS,
     lineWidth: DEFAULT_LINE_WIDTH,
     fillOpacity: DEFAULT_POLYGON_FILL_OPACITY,
+    pointIcon: DEFAULT_POINT_ICON,
+    labelMode: DEFAULT_LABEL_MODE,
+    labelSize: DEFAULT_LABEL_SIZE,
+    labelHalo: DEFAULT_LABEL_HALO,
+    labelPriority: DEFAULT_LABEL_PRIORITY,
+    lineDash: DEFAULT_LINE_DASH,
+    lineArrows: DEFAULT_LINE_ARROWS,
+    lineDirection: DEFAULT_LINE_DIRECTION,
+    polygonPattern: DEFAULT_POLYGON_PATTERN,
+    polygonBorderMode: DEFAULT_POLYGON_BORDER_MODE,
   }
 }
 
@@ -944,6 +1333,32 @@ function parseViewBookmarks(value: unknown): ViewBookmark[] {
   return items.slice(0, MAX_VIEW_BOOKMARKS)
 }
 
+function parseLayerZoomVisibility(
+  value: unknown,
+): Record<string, { minZoom: number; maxZoom: number }> {
+  if (!isObjectRecord(value)) {
+    return {}
+  }
+  const result: Record<string, { minZoom: number; maxZoom: number }> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (!isObjectRecord(entry)) {
+      continue
+    }
+    const minZoom = parseFiniteNumber(entry.minZoom)
+    const maxZoom = parseFiniteNumber(entry.maxZoom)
+    if (minZoom === null || maxZoom === null) {
+      continue
+    }
+    const normalizedMin = clamp(Math.round(minZoom), 10, 18)
+    const normalizedMax = clamp(Math.round(maxZoom), 10, 18)
+    result[key] = {
+      minZoom: Math.min(normalizedMin, normalizedMax),
+      maxZoom: Math.max(normalizedMin, normalizedMax),
+    }
+  }
+  return result
+}
+
 function parseCoordinateQuery(value: string): LatLngTuple | null {
   const normalized = value
     .trim()
@@ -1105,6 +1520,30 @@ function hydrateCreateDraftFromPartial(
     pointRadius: styleDraft.pointRadius,
     lineWidth: styleDraft.lineWidth,
     fillOpacity: styleDraft.fillOpacity,
+    pointIcon: normalizePointIcon(value.pointIcon ?? fallback.pointIcon),
+    labelMode: normalizeLabelMode(value.labelMode ?? fallback.labelMode),
+    labelSize: normalizeLabelSize(
+      parseFiniteNumber(value.labelSize) ?? fallback.labelSize,
+    ),
+    labelHalo:
+      typeof value.labelHalo === 'boolean' ? value.labelHalo : fallback.labelHalo,
+    labelPriority: normalizeLabelPriority(
+      parseFiniteNumber(value.labelPriority) ?? fallback.labelPriority,
+    ),
+    lineDash: normalizeLineDash(value.lineDash ?? fallback.lineDash),
+    lineArrows:
+      typeof value.lineArrows === 'boolean'
+        ? value.lineArrows
+        : fallback.lineArrows,
+    lineDirection: normalizeLineDirection(
+      value.lineDirection ?? fallback.lineDirection,
+    ),
+    polygonPattern: normalizePolygonPattern(
+      value.polygonPattern ?? fallback.polygonPattern,
+    ),
+    polygonBorderMode: normalizePolygonBorderMode(
+      value.polygonBorderMode ?? fallback.polygonBorderMode,
+    ),
   }
 }
 
@@ -1135,6 +1574,24 @@ function hydrateEditDraftFromPartial(value: unknown): EditDraft | null {
     pointRadius: styleDraft.pointRadius,
     lineWidth: styleDraft.lineWidth,
     fillOpacity: styleDraft.fillOpacity,
+    pointIcon: normalizePointIcon(value.pointIcon),
+    labelMode: normalizeLabelMode(value.labelMode),
+    labelSize: normalizeLabelSize(
+      parseFiniteNumber(value.labelSize) ?? DEFAULT_LABEL_SIZE,
+    ),
+    labelHalo:
+      typeof value.labelHalo === 'boolean' ? value.labelHalo : DEFAULT_LABEL_HALO,
+    labelPriority: normalizeLabelPriority(
+      parseFiniteNumber(value.labelPriority) ?? DEFAULT_LABEL_PRIORITY,
+    ),
+    lineDash: normalizeLineDash(value.lineDash),
+    lineArrows:
+      typeof value.lineArrows === 'boolean'
+        ? value.lineArrows
+        : DEFAULT_LINE_ARROWS,
+    lineDirection: normalizeLineDirection(value.lineDirection),
+    polygonPattern: normalizePolygonPattern(value.polygonPattern),
+    polygonBorderMode: normalizePolygonBorderMode(value.polygonBorderMode),
   }
 }
 
@@ -1448,6 +1905,70 @@ function computeFeatureCenter(feature: GeometryFeature): LatLngTuple {
   return [lat / points.length, lng / points.length]
 }
 
+function computeBearingDegrees(from: LatLngTuple, to: LatLngTuple): number {
+  const lat1 = (from[0] * Math.PI) / 180
+  const lat2 = (to[0] * Math.PI) / 180
+  const dLng = ((to[1] - from[1]) * Math.PI) / 180
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI
+  return (bearing + 360) % 360
+}
+
+function buildLineArrowAnchors(
+  points: LatLngTuple[],
+  direction: LineDirectionMode,
+): Array<{ id: string; position: LatLngTuple; angle: number }> {
+  if (points.length < 2 || direction === 'none') {
+    return []
+  }
+  const anchors: Array<{ id: string; position: LatLngTuple; angle: number }> = []
+  const last = points.length - 1
+  anchors.push({
+    id: 'forward',
+    position: points[last],
+    angle: computeBearingDegrees(points[last - 1], points[last]),
+  })
+  if (direction === 'both') {
+    anchors.push({
+      id: 'backward',
+      position: points[0],
+      angle: computeBearingDegrees(points[1], points[0]),
+    })
+  }
+  return anchors
+}
+
+function makePointIcon(
+  iconId: PointIconId,
+  color: string,
+  selected: boolean,
+  radius: number,
+): DivIcon {
+  const glyph = POINT_ICON_GLYPHS[iconId]
+  const size = clamp(Math.round(radius * 2.7), 16, 46)
+  const border = selected ? '#0f172a' : color
+  const bg = iconId === 'dot' ? color : '#ffffff'
+  const textColor = iconId === 'dot' ? '#ffffff' : color
+  return new DivIcon({
+    className: 'feature-point-icon-wrapper',
+    html: `<span class="feature-point-icon${selected ? ' selected' : ''}" style="--icon-size:${size}px;--icon-border:${border};--icon-bg:${bg};--icon-color:${textColor};">${glyph}</span>`,
+    iconSize: [size, size],
+    iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
+  })
+}
+
+function makeLineArrowIcon(color: string, angle: number): DivIcon {
+  return new DivIcon({
+    className: 'feature-line-arrow-wrapper',
+    html: `<span class="feature-line-arrow" style="--arrow-color:${color};--arrow-angle:${angle.toFixed(1)}deg;">▲</span>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  })
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -1465,11 +1986,15 @@ function App() {
   const [featureSortMode, setFeatureSortMode] =
     useState<VisibleFeatureSortMode>('alpha')
   const [isLabelOverlayEnabled, setIsLabelOverlayEnabled] = useState(false)
+  const [isLabelCollisionEnabled, setIsLabelCollisionEnabled] = useState(true)
   const [labelMinZoom, setLabelMinZoom] = useState(14)
   const [collapsedLayerFolders, setCollapsedLayerFolders] = useState<
     Record<string, boolean>
   >({})
   const [lockedLayers, setLockedLayers] = useState<Record<string, boolean>>({})
+  const [layerZoomVisibility, setLayerZoomVisibility] = useState<
+    Record<string, { minZoom: number; maxZoom: number }>
+  >({})
   const [mapSearchQuery, setMapSearchQuery] = useState('')
   const [mapSearchResults, setMapSearchResults] = useState<MapSearchCandidate[]>([])
   const [isSearchingMap, setIsSearchingMap] = useState(false)
@@ -1492,6 +2017,11 @@ function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null)
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
+  const [bulkStatus, setBulkStatus] = useState<StatusId | ''>('')
+  const [bulkColor, setBulkColor] = useState('')
+  const [bulkCategory, setBulkCategory] = useState('')
+  const [bulkLayerLabel, setBulkLayerLabel] = useState('')
+  const [bulkLayerId, setBulkLayerId] = useState('')
   const [isZoneSelectionMode, setIsZoneSelectionMode] = useState(false)
   const [isZoneSelectionDragging, setIsZoneSelectionDragging] = useState(false)
   const [zoneSelectionStart, setZoneSelectionStart] = useState<LatLngTuple | null>(
@@ -1520,8 +2050,10 @@ function App() {
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() =>
     buildDefaultDraft(fallbackLayers),
   )
+  const [createTemplateId, setCreateTemplateId] = useState('')
   const [createPoints, setCreatePoints] = useState<LatLngTuple[]>([])
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
+  const [editTemplateId, setEditTemplateId] = useState('')
   const [editPoints, setEditPoints] = useState<LatLngTuple[]>([])
   const [isRedrawingEditGeometry, setIsRedrawingEditGeometry] = useState(false)
   const [importDraft, setImportDraft] = useState<ImportDraft>(() =>
@@ -1734,6 +2266,11 @@ function App() {
       if (persistedCollapsedFolders) {
         setCollapsedLayerFolders(persistedCollapsedFolders)
       }
+      if (persisted.layerZoomVisibility !== undefined) {
+        setLayerZoomVisibility(
+          parseLayerZoomVisibility(persisted.layerZoomVisibility),
+        )
+      }
       if (persisted.viewBookmarks !== undefined) {
         setViewBookmarks(parseViewBookmarks(persisted.viewBookmarks))
       }
@@ -1777,6 +2314,12 @@ function App() {
       const persistedLabelOverlay = parseBooleanValue(persisted.isLabelOverlayEnabled)
       if (persistedLabelOverlay !== null) {
         setIsLabelOverlayEnabled(persistedLabelOverlay)
+      }
+      const persistedLabelCollision = parseBooleanValue(
+        persisted.isLabelCollisionEnabled,
+      )
+      if (persistedLabelCollision !== null) {
+        setIsLabelCollisionEnabled(persistedLabelCollision)
       }
 
       const persistedLabelMinZoom = parseFiniteNumber(persisted.labelMinZoom)
@@ -1928,6 +2471,7 @@ function App() {
       featureSearchQuery,
       featureSortMode,
       isLabelOverlayEnabled,
+      isLabelCollisionEnabled,
       labelMinZoom,
       isAdminPanelOpen,
       showDebugInfo,
@@ -1951,6 +2495,7 @@ function App() {
       localHistoryFuture,
       lockedLayers,
       collapsedLayerFolders,
+      layerZoomVisibility,
       viewBookmarks,
       mapView: mapView ?? null,
     }
@@ -1978,10 +2523,12 @@ function App() {
     isAdminPanelOpen,
     isGridEnabled,
     isLabelOverlayEnabled,
+    isLabelCollisionEnabled,
     isMeasureMode,
     isRedrawingEditGeometry,
     isSnappingEnabled,
     labelMinZoom,
+    layerZoomVisibility,
     lockedLayers,
     localHistoryFuture,
     localHistoryPast,
@@ -2010,12 +2557,20 @@ function App() {
         if (!activeLayers[layer.id]) {
           return false
         }
+        const zoomRule =
+          layerZoomVisibility[toLayerLockKey(layer.category, layer.id)] ?? null
+        const activeZoom = mapViewport?.zoom ?? 12
+        if (zoomRule) {
+          if (activeZoom < zoomRule.minZoom || activeZoom > zoomRule.maxZoom) {
+            return false
+          }
+        }
         if (categoryFilter === 'all') {
           return true
         }
         return layer.category === categoryFilter
       }),
-    [layers, activeLayers, categoryFilter],
+    [layers, activeLayers, categoryFilter, layerZoomVisibility, mapViewport],
   )
 
   const isFeatureVisibleByFilters = useCallback(
@@ -2127,6 +2682,40 @@ function App() {
     [categories, layers],
   )
 
+  const styleTemplates = useMemo<StyleTemplateOption[]>(() => {
+    const templates: StyleTemplateOption[] = [
+      {
+        id: 'status-existant',
+        label: 'Statut: Existant',
+        description: 'Style solide et priorite de label elevee.',
+        patch: buildStatusTemplatePatch('existant'),
+      },
+      {
+        id: 'status-en-cours',
+        label: 'Statut: En cours',
+        description: 'Style intermediaire, tirets et priorite moyenne.',
+        patch: buildStatusTemplatePatch('en cours'),
+      },
+      {
+        id: 'status-propose',
+        label: 'Statut: Propose',
+        description: 'Style prospectif discret.',
+        patch: buildStatusTemplatePatch('propose'),
+      },
+    ]
+
+    for (const category of categories) {
+      templates.push({
+        id: `category-${category}`,
+        label: `Categorie: ${category}`,
+        description: `Preset adapte a "${category}".`,
+        patch: buildCategoryTemplatePatch(category),
+      })
+    }
+
+    return templates
+  }, [categories])
+
   useEffect(() => {
     setCollapsedLayerFolders((current) => {
       const next = { ...current }
@@ -2153,6 +2742,27 @@ function App() {
           next[key] = value
         } else {
           changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [layers])
+
+  useEffect(() => {
+    setLayerZoomVisibility((current) => {
+      const validKeys = new Set(
+        layers.map((layer) => toLayerLockKey(layer.category, layer.id)),
+      )
+      let changed = false
+      const next: Record<string, { minZoom: number; maxZoom: number }> = {}
+      for (const [key, value] of Object.entries(current)) {
+        if (!validKeys.has(key)) {
+          changed = true
+          continue
+        }
+        next[key] = {
+          minZoom: clamp(Math.round(value.minZoom), 10, 18),
+          maxZoom: clamp(Math.round(value.maxZoom), 10, 18),
         }
       }
       return changed ? next : current
@@ -2488,6 +3098,48 @@ function App() {
     }))
   }
 
+  const handleLayerZoomChange = useCallback(
+    (
+      category: string,
+      layerId: string,
+      field: 'minZoom' | 'maxZoom',
+      value: number,
+    ) => {
+      const key = toLayerLockKey(category, layerId)
+      const numeric = clamp(Math.round(value), 10, 18)
+      setLayerZoomVisibility((current) => {
+        const existing = current[key] ?? { minZoom: 10, maxZoom: 18 }
+        const nextEntry =
+          field === 'minZoom'
+            ? {
+                minZoom: Math.min(numeric, existing.maxZoom),
+                maxZoom: Math.max(numeric, existing.maxZoom),
+              }
+            : {
+                minZoom: Math.min(existing.minZoom, numeric),
+                maxZoom: Math.max(existing.minZoom, numeric),
+              }
+        return {
+          ...current,
+          [key]: nextEntry,
+        }
+      })
+    },
+    [],
+  )
+
+  const handleResetLayerZoom = useCallback((category: string, layerId: string) => {
+    const key = toLayerLockKey(category, layerId)
+    setLayerZoomVisibility((current) => {
+      if (current[key] === undefined) {
+        return current
+      }
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }, [])
+
   const toggleLayerFolder = useCallback((category: string) => {
     setCollapsedLayerFolders((current) => ({
       ...current,
@@ -2574,6 +3226,16 @@ function App() {
         pointRadius: styleDraft.pointRadius,
         lineWidth: styleDraft.lineWidth,
         fillOpacity: styleDraft.fillOpacity,
+        pointIcon: styleDraft.pointIcon,
+        labelMode: styleDraft.labelMode,
+        labelSize: styleDraft.labelSize,
+        labelHalo: styleDraft.labelHalo,
+        labelPriority: styleDraft.labelPriority,
+        lineDash: styleDraft.lineDash,
+        lineArrows: styleDraft.lineArrows,
+        lineDirection: styleDraft.lineDirection,
+        polygonPattern: styleDraft.polygonPattern,
+        polygonBorderMode: styleDraft.polygonBorderMode,
       })
       setEditPoints(getFeaturePoints(match.feature))
       setIsRedrawingEditGeometry(false)
@@ -3134,11 +3796,7 @@ function App() {
         setCreateDraft((current) => ({
           ...current,
           geometry,
-          ...resolveDraftStyle(geometry, {
-            pointRadius: current.pointRadius,
-            lineWidth: current.lineWidth,
-            fillOpacity: current.fillOpacity,
-          }),
+          ...resolveDraftStyle(geometry, current),
         }))
         setCreatePoints([])
         setIsRedrawingEditGeometry(false)
@@ -3331,6 +3989,16 @@ function App() {
       pointRadius: createDraft.pointRadius,
       lineWidth: createDraft.lineWidth,
       fillOpacity: createDraft.fillOpacity,
+      pointIcon: createDraft.pointIcon,
+      labelMode: createDraft.labelMode,
+      labelSize: createDraft.labelSize,
+      labelHalo: createDraft.labelHalo,
+      labelPriority: createDraft.labelPriority,
+      lineDash: createDraft.lineDash,
+      lineArrows: createDraft.lineArrows,
+      lineDirection: createDraft.lineDirection,
+      polygonPattern: createDraft.polygonPattern,
+      polygonBorderMode: createDraft.polygonBorderMode,
     })
     setEditPoints(geometryPointsSnapshot)
     setIsRedrawingEditGeometry(false)
@@ -3461,6 +4129,165 @@ function App() {
     layers,
     refreshFeatureVersions,
     selectedFeatureId,
+    syncSupabaseLayers,
+  ])
+
+  const handleApplyBulkUpdate = useCallback(async () => {
+    if (!supabase || !isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+
+    const ids =
+      selectedFeatureIds.length > 0
+        ? selectedFeatureIds
+        : selectedFeatureId
+          ? [selectedFeatureId]
+          : []
+    if (ids.length === 0) {
+      setAdminNotice('Selectionne au moins un element.')
+      return
+    }
+
+    const refs = ids
+      .map((id) => featureById.get(id))
+      .filter((value): value is FeatureRef => Boolean(value))
+    if (refs.length === 0) {
+      setAdminNotice('Aucun element selectionne.')
+      return
+    }
+    if (refs.some((ref) => isLayerLocked(ref.category, ref.layerId))) {
+      setAdminNotice('Edition en masse refusee: selection sur calque verrouille.')
+      return
+    }
+
+    const statusPatch = bulkStatus || null
+    const colorPatch = bulkColor.trim() || null
+    const categoryPatch = bulkCategory.trim() || null
+    const layerLabelPatch = bulkLayerLabel.trim() || null
+    const layerIdPatch = bulkLayerId.trim() || null
+
+    const hasAnyPatch =
+      statusPatch !== null ||
+      colorPatch !== null ||
+      categoryPatch !== null ||
+      layerLabelPatch !== null ||
+      layerIdPatch !== null
+    if (!hasAnyPatch) {
+      setAdminNotice('Renseigne au moins un champ pour l edition en masse.')
+      return
+    }
+
+    if (colorPatch && !isHexColor(colorPatch)) {
+      setAdminNotice('Couleur invalide pour edition en masse (#RRGGBB).')
+      return
+    }
+
+    const targetLayerCounters = new Map<string, number>()
+
+    setIsSaving(true)
+    setAdminNotice(null)
+
+    let updated = 0
+    let firstError: string | null = null
+    let firstTargetLayerId: string | undefined
+
+    for (const ref of refs) {
+      const nextCategory = categoryPatch ?? ref.category
+      const nextLayerLabel = layerLabelPatch ?? ref.layerLabel
+      const rawLayerId = layerIdPatch ?? ref.layerId
+      const nextLayerId = toLayerId(rawLayerId, nextLayerLabel)
+
+      if (!nextCategory || !nextLayerLabel || !nextLayerId) {
+        firstError = 'Categorie/calque invalide pour edition en masse.'
+        break
+      }
+      if (isLayerLocked(nextCategory, nextLayerId)) {
+        firstError = `Calque cible verrouille (${nextLayerLabel}).`
+        break
+      }
+
+      const key = `${nextCategory}::${nextLayerId}`
+      const baseSortCount =
+        targetLayerCounters.get(key) ??
+        (layers.find(
+          (layer) => layer.category === nextCategory && layer.id === nextLayerId,
+        )?.features.length ?? 0)
+      const nextSortCount = baseSortCount + 1
+      targetLayerCounters.set(key, nextSortCount)
+
+      const targetLayer = layers.find(
+        (layer) => layer.category === nextCategory && layer.id === nextLayerId,
+      )
+      const layerSortOrder =
+        targetLayer !== undefined
+          ? getLayerSortOrderValue(targetLayer)
+          : layers
+              .filter((layer) => layer.category === nextCategory)
+              .reduce(
+                (maxOrder, layer, index) =>
+                  Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+                -1,
+              ) + 1
+
+      const updatePayload: Record<string, unknown> = {
+        category: nextCategory,
+        layer_id: nextLayerId,
+        layer_label: nextLayerLabel,
+        layer_sort_order: layerSortOrder,
+        sort_order: nextSortCount,
+      }
+      if (statusPatch) {
+        updatePayload.status = statusPatch
+      }
+      if (colorPatch) {
+        updatePayload.color = colorPatch
+      }
+
+      const { error } = await supabase
+        .from('map_features')
+        .update(updatePayload)
+        .eq('id', ref.feature.id)
+      if (error) {
+        firstError = error.message
+        break
+      }
+
+      updated += 1
+      if (!firstTargetLayerId) {
+        firstTargetLayerId = nextLayerId
+      }
+    }
+
+    if (firstError) {
+      setIsSaving(false)
+      setAdminNotice(
+        updated > 0
+          ? `${updated} element(s) modifies, puis erreur: ${firstError}`
+          : `Erreur edition en masse: ${firstError}`,
+      )
+      return
+    }
+
+    await syncSupabaseLayers(firstTargetLayerId)
+    if (selectedFeatureId) {
+      await refreshFeatureVersions(selectedFeatureId)
+    }
+    setIsSaving(false)
+    setAdminNotice(`${updated} element(s) mis a jour en masse.`)
+  }, [
+    bulkCategory,
+    bulkColor,
+    bulkLayerId,
+    bulkLayerLabel,
+    bulkStatus,
+    featureById,
+    isAdmin,
+    isLayerLocked,
+    layers,
+    refreshFeatureVersions,
+    selectedFeatureId,
+    selectedFeatureIds,
     syncSupabaseLayers,
   ])
 
@@ -3769,10 +4596,27 @@ function App() {
   }, [isSnappingEnabled])
 
   const applyStyleToCurrentDraft = useCallback(
-    (changes: Partial<Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'>>) => {
-      const normalized: Partial<
-        Pick<CreateDraft, 'pointRadius' | 'lineWidth' | 'fillOpacity'>
-      > = {}
+    (
+      changes: Partial<
+        Pick<
+          CreateDraft,
+          | 'pointRadius'
+          | 'lineWidth'
+          | 'fillOpacity'
+          | 'pointIcon'
+          | 'labelMode'
+          | 'labelSize'
+          | 'labelHalo'
+          | 'labelPriority'
+          | 'lineDash'
+          | 'lineArrows'
+          | 'lineDirection'
+          | 'polygonPattern'
+          | 'polygonBorderMode'
+        >
+      >,
+    ) => {
+      const normalized: Partial<CreateDraft> = {}
       if (typeof changes.pointRadius === 'number' && Number.isFinite(changes.pointRadius)) {
         normalized.pointRadius = normalizePointRadius(changes.pointRadius)
       }
@@ -3781,6 +4625,41 @@ function App() {
       }
       if (typeof changes.fillOpacity === 'number' && Number.isFinite(changes.fillOpacity)) {
         normalized.fillOpacity = normalizeFillOpacity(changes.fillOpacity)
+      }
+      if (changes.pointIcon !== undefined) {
+        normalized.pointIcon = normalizePointIcon(changes.pointIcon)
+      }
+      if (changes.labelMode !== undefined) {
+        normalized.labelMode = normalizeLabelMode(changes.labelMode)
+      }
+      if (typeof changes.labelSize === 'number' && Number.isFinite(changes.labelSize)) {
+        normalized.labelSize = normalizeLabelSize(changes.labelSize)
+      }
+      if (typeof changes.labelHalo === 'boolean') {
+        normalized.labelHalo = changes.labelHalo
+      }
+      if (
+        typeof changes.labelPriority === 'number' &&
+        Number.isFinite(changes.labelPriority)
+      ) {
+        normalized.labelPriority = normalizeLabelPriority(changes.labelPriority)
+      }
+      if (changes.lineDash !== undefined) {
+        normalized.lineDash = normalizeLineDash(changes.lineDash)
+      }
+      if (typeof changes.lineArrows === 'boolean') {
+        normalized.lineArrows = changes.lineArrows
+      }
+      if (changes.lineDirection !== undefined) {
+        normalized.lineDirection = normalizeLineDirection(changes.lineDirection)
+      }
+      if (changes.polygonPattern !== undefined) {
+        normalized.polygonPattern = normalizePolygonPattern(changes.polygonPattern)
+      }
+      if (changes.polygonBorderMode !== undefined) {
+        normalized.polygonBorderMode = normalizePolygonBorderMode(
+          changes.polygonBorderMode,
+        )
       }
       if (Object.keys(normalized).length === 0) {
         return
@@ -3805,6 +4684,43 @@ function App() {
       }
     },
     [adminMode],
+  )
+
+  const applyTemplateToCreateDraft = useCallback(
+    (templateId: string) => {
+      const template = styleTemplates.find((item) => item.id === templateId)
+      if (!template) {
+        return
+      }
+      const normalizedPatch = normalizeTemplatePatch(template.patch)
+      setCreateDraft((current) => ({
+        ...current,
+        ...normalizedPatch,
+      }))
+      setCreateTemplateId(templateId)
+      setAdminNotice(`Template applique: ${template.label}.`)
+    },
+    [styleTemplates],
+  )
+
+  const applyTemplateToEditDraft = useCallback(
+    (templateId: string) => {
+      if (!editDraft) {
+        return
+      }
+      const template = styleTemplates.find((item) => item.id === templateId)
+      if (!template) {
+        return
+      }
+      const normalizedPatch = normalizeTemplatePatch(template.patch)
+      setEditDraft({
+        ...editDraft,
+        ...normalizedPatch,
+      })
+      setEditTemplateId(templateId)
+      setAdminNotice(`Template applique: ${template.label}.`)
+    },
+    [editDraft, styleTemplates],
   )
 
   const handleClearLocalHistory = useCallback(() => {
@@ -4500,6 +5416,16 @@ function App() {
             pointRadius: DEFAULT_POINT_RADIUS,
             lineWidth: DEFAULT_LINE_WIDTH,
             fillOpacity: DEFAULT_POLYGON_FILL_OPACITY,
+            pointIcon: DEFAULT_POINT_ICON,
+            labelMode: DEFAULT_LABEL_MODE,
+            labelSize: DEFAULT_LABEL_SIZE,
+            labelHalo: DEFAULT_LABEL_HALO,
+            labelPriority: DEFAULT_LABEL_PRIORITY,
+            lineDash: DEFAULT_LINE_DASH,
+            lineArrows: DEFAULT_LINE_ARROWS,
+            lineDirection: DEFAULT_LINE_DIRECTION,
+            polygonPattern: DEFAULT_POLYGON_PATTERN,
+            polygonBorderMode: DEFAULT_POLYGON_BORDER_MODE,
           }),
           geometryType: item.geometry,
           coordinates,
@@ -4897,11 +5823,20 @@ function App() {
               color: editDraft.color,
               weight: clamp(normalizeLineWidth(editDraft.lineWidth) + 1, 1, 14),
               opacity: 0.95,
+              dashArray: toDashArray(editDraft.lineDash),
             }}
           />
         )
       }
 
+      const editPolygonDash =
+        editDraft.polygonPattern === 'diagonal'
+          ? '9 6'
+          : editDraft.polygonPattern === 'cross'
+            ? '4 4'
+            : editDraft.polygonPattern === 'dots'
+              ? '1 7'
+              : undefined
       return (
         <Polygon
           positions={editPoints}
@@ -4910,6 +5845,7 @@ function App() {
             weight: clamp(normalizeLineWidth(editDraft.lineWidth) + 1, 1, 14),
             fillColor: editDraft.color,
             fillOpacity: clamp(normalizeFillOpacity(editDraft.fillOpacity) + 0.08, 0.05, 0.95),
+            dashArray: editPolygonDash,
           }}
         />
       )
@@ -5067,7 +6003,7 @@ function App() {
     const layerLocked = isLayerLocked(layer.category, layer.id)
     return layer.features
       .filter((feature) => isFeatureVisibleByFilters(feature))
-      .map((feature) => {
+      .flatMap((feature) => {
         const styleDraft = resolveDraftStyle(feature.geometry, feature.style)
         const isSelected = selectedFeatureIdSet.has(feature.id)
         const isFocusedSelection = selectedFeatureId === feature.id
@@ -5078,7 +6014,7 @@ function App() {
           editPoints.length > 0
 
         if (isHiddenSelectedGeometry) {
-          return null
+          return [] as ReactElement[]
         }
 
         const popup = (
@@ -5108,6 +6044,23 @@ function App() {
           </Popup>
         )
 
+        const hoverLabelTooltip =
+          styleDraft.labelMode === 'hover' ? (
+            <Tooltip direction="top" sticky className="feature-hover-label">
+              <span
+                className="feature-hover-label-text"
+                style={{
+                  fontSize: `${styleDraft.labelSize}px`,
+                  textShadow: styleDraft.labelHalo
+                    ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff'
+                    : 'none',
+                }}
+              >
+                {feature.name}
+              </span>
+            </Tooltip>
+          ) : null
+
         const eventHandlers = isAdmin
           ? {
               click: (event: LeafletMouseEvent) =>
@@ -5118,30 +6071,53 @@ function App() {
           : undefined
 
         if (feature.geometry === 'point') {
-          return (
-            <CircleMarker
+          const radius = clamp(
+            normalizePointRadius(styleDraft.pointRadius) + (isSelected ? 2 : 0),
+            3,
+            24,
+          )
+          if (styleDraft.pointIcon === 'dot') {
+            return [
+              <CircleMarker
+                key={feature.id}
+                center={feature.position}
+                radius={radius}
+                eventHandlers={eventHandlers}
+                pathOptions={{
+                  color: isSelected ? '#0f172a' : feature.color,
+                  fillColor: feature.color,
+                  fillOpacity: isSelected ? 0.95 : 0.85,
+                  weight: isSelected ? 3 : 2,
+                }}
+              >
+                {popup}
+                {hoverLabelTooltip}
+              </CircleMarker>,
+            ]
+          }
+          return [
+            <Marker
               key={feature.id}
-              center={feature.position}
-              radius={clamp(
-                normalizePointRadius(styleDraft.pointRadius) + (isSelected ? 2 : 0),
-                3,
-                24,
-              )}
+              position={feature.position}
+              icon={makePointIcon(styleDraft.pointIcon, feature.color, isSelected, radius)}
               eventHandlers={eventHandlers}
-              pathOptions={{
-                color: isSelected ? '#0f172a' : feature.color,
-                fillColor: feature.color,
-                fillOpacity: isSelected ? 0.95 : 0.85,
-                weight: isSelected ? 3 : 2,
-              }}
             >
               {popup}
-            </CircleMarker>
-          )
+              {hoverLabelTooltip}
+            </Marker>,
+          ]
         }
 
         if (feature.geometry === 'line') {
-          return (
+          const lineDashArray = toDashArray(styleDraft.lineDash)
+          const arrowMode: LineDirectionMode =
+            styleDraft.lineDirection !== 'none'
+              ? styleDraft.lineDirection
+              : styleDraft.lineArrows
+                ? 'forward'
+                : 'none'
+          const arrowAnchors = buildLineArrowAnchors(feature.positions, arrowMode)
+          const elements: ReactElement[] = [
             <Polyline
               key={feature.id}
               positions={feature.positions}
@@ -5154,36 +6130,85 @@ function App() {
                   14,
                 ),
                 opacity: 0.9,
+                dashArray: lineDashArray,
               }}
             >
               {popup}
-            </Polyline>
-          )
+              {hoverLabelTooltip}
+            </Polyline>,
+          ]
+          for (const anchor of arrowAnchors) {
+            elements.push(
+              <Marker
+                key={`${feature.id}-arrow-${anchor.id}`}
+                position={anchor.position}
+                icon={makeLineArrowIcon(feature.color, anchor.angle)}
+                interactive={false}
+              />,
+            )
+          }
+          return elements
         }
 
-        return (
+        const polygonDashArray =
+          styleDraft.polygonPattern === 'diagonal'
+            ? '9 6'
+            : styleDraft.polygonPattern === 'cross'
+              ? '4 4'
+              : styleDraft.polygonPattern === 'dots'
+                ? '1 7'
+                : undefined
+        const baseWeight = clamp(
+          normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1 : 0),
+          1,
+          14,
+        )
+        const borderWeight =
+          styleDraft.polygonBorderMode === 'inner'
+            ? clamp(baseWeight - 1, 1, 14)
+            : styleDraft.polygonBorderMode === 'outer'
+              ? clamp(baseWeight + 1.4, 1, 14)
+              : baseWeight
+        const fillOpacity = clamp(
+          normalizeFillOpacity(styleDraft.fillOpacity) +
+            (isSelected ? 0.12 : 0) -
+            (styleDraft.polygonPattern === 'none' ? 0 : 0.03),
+          0.05,
+          0.95,
+        )
+
+        const elements: ReactElement[] = [
           <Polygon
             key={feature.id}
             positions={feature.positions}
             eventHandlers={eventHandlers}
             pathOptions={{
               color: feature.color,
-              weight: clamp(
-                normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1 : 0),
-                1,
-                14,
-              ),
+              weight: borderWeight,
               fillColor: feature.color,
-              fillOpacity: clamp(
-                normalizeFillOpacity(styleDraft.fillOpacity) + (isSelected ? 0.12 : 0),
-                0.05,
-                0.95,
-              ),
+              fillOpacity,
+              dashArray: polygonDashArray,
             }}
           >
             {popup}
-          </Polygon>
-        )
+            {hoverLabelTooltip}
+          </Polygon>,
+        ]
+        if (styleDraft.polygonBorderMode === 'outer') {
+          elements.push(
+            <Polyline
+              key={`${feature.id}-outer-border`}
+              positions={[...feature.positions, feature.positions[0]]}
+              interactive={false}
+              pathOptions={{
+                color: '#0f172a',
+                weight: clamp(borderWeight + 2, 1, 14),
+                opacity: 0.24,
+              }}
+            />,
+          )
+        }
+        return elements
       })
   }
 
@@ -5250,27 +6275,77 @@ function App() {
       : adminMode === 'edit' && editDraft
         ? editDraft
         : null
+  const activeTemplateId =
+    adminMode === 'create'
+      ? createTemplateId
+      : adminMode === 'edit'
+        ? editTemplateId
+        : ''
   const canEditStyleIndividually =
     activeStyleDraft !== null && (adminMode === 'create' || selectedFeatureId !== null)
   const currentMapZoom = mapViewport?.zoom ?? 0
   const isLabelOverlayActive =
     isLabelOverlayEnabled && currentMapZoom >= labelMinZoom
   const mapLabelEntries = useMemo(() => {
-    if (!isLabelOverlayActive) {
-      return [] as Array<{
-        id: string
-        name: string
-        color: string
-        position: LatLngTuple
-      }>
+    type LabelEntry = {
+      id: string
+      name: string
+      color: string
+      position: LatLngTuple
+      labelSize: number
+      labelHalo: boolean
+      labelPriority: number
+      labelMode: 'auto' | 'always'
     }
-    return mapVisibleFeatureEntries.map((entry) => ({
-      id: entry.feature.id,
-      name: entry.feature.name,
-      color: entry.feature.color,
-      position: computeFeatureCenter(entry.feature),
-    }))
-  }, [isLabelOverlayActive, mapVisibleFeatureEntries])
+    if (!isLabelOverlayActive) {
+      return [] as LabelEntry[]
+    }
+
+    const candidates: LabelEntry[] = []
+    for (const entry of mapVisibleFeatureEntries) {
+      const style = resolveDraftStyle(entry.feature.geometry, entry.feature.style)
+      if (style.labelMode === 'hover') {
+        continue
+      }
+      candidates.push({
+        id: entry.feature.id,
+        name: entry.feature.name,
+        color: entry.feature.color,
+        position: computeFeatureCenter(entry.feature),
+        labelSize: normalizeLabelSize(style.labelSize),
+        labelHalo: style.labelHalo,
+        labelPriority: normalizeLabelPriority(style.labelPriority),
+        labelMode: style.labelMode === 'always' ? 'always' : 'auto',
+      })
+    }
+    candidates.sort((left, right) => right.labelPriority - left.labelPriority)
+
+    if (!isLabelCollisionEnabled) {
+      return candidates
+    }
+
+    const accepted: LabelEntry[] = []
+    const baseThresholdMeters = Math.max(5, 1200 / Math.pow(2, currentMapZoom - 10))
+    for (const candidate of candidates) {
+      if (candidate.labelMode === 'always') {
+        accepted.push(candidate)
+        continue
+      }
+      const threshold = baseThresholdMeters * (candidate.labelSize / DEFAULT_LABEL_SIZE)
+      const hasCollision = accepted.some(
+        (entry) => distanceMeters(entry.position, candidate.position) < threshold,
+      )
+      if (!hasCollision) {
+        accepted.push(candidate)
+      }
+    }
+    return accepted
+  }, [
+    currentMapZoom,
+    isLabelCollisionEnabled,
+    isLabelOverlayActive,
+    mapVisibleFeatureEntries,
+  ])
 
   return (
     <div className="app-shell">
@@ -5651,11 +6726,7 @@ function App() {
                           setCreateDraft((current) => ({
                             ...current,
                             geometry: nextGeometry,
-                            ...resolveDraftStyle(nextGeometry, {
-                              pointRadius: current.pointRadius,
-                              lineWidth: current.lineWidth,
-                              fillOpacity: current.fillOpacity,
-                            }),
+                            ...resolveDraftStyle(nextGeometry, current),
                           }))
                           setCreatePoints([])
                         }}
@@ -6120,6 +7191,99 @@ function App() {
                 ) : null}
 
                 <div className="editor-block">
+                  <h3>Edition en masse</h3>
+                  <p className="muted">
+                    Selection:
+                    {' '}
+                    <strong>
+                      {selectedFeatureIds.length > 0
+                        ? selectedFeatureIds.length
+                        : selectedFeatureId
+                          ? 1
+                          : 0}
+                    </strong>{' '}
+                    element(s)
+                  </p>
+                  <div className="grid-2">
+                    <label>
+                      Statut
+                      <select
+                        value={bulkStatus}
+                        onChange={(event) =>
+                          setBulkStatus(event.target.value as StatusId | '')
+                        }
+                      >
+                        <option value="">Conserver</option>
+                        <option value="existant">Existant</option>
+                        <option value="en cours">En cours</option>
+                        <option value="propose">Propose</option>
+                      </select>
+                    </label>
+                    <label>
+                      Couleur
+                      <input
+                        type="text"
+                        value={bulkColor}
+                        onChange={(event) => setBulkColor(event.target.value)}
+                        placeholder="#RRGGBB (optionnel)"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid-2">
+                    <label>
+                      Categorie cible
+                      <input
+                        type="text"
+                        value={bulkCategory}
+                        onChange={(event) => setBulkCategory(event.target.value)}
+                        placeholder="Conserver si vide"
+                      />
+                    </label>
+                    <label>
+                      Nom du calque cible
+                      <input
+                        type="text"
+                        value={bulkLayerLabel}
+                        onChange={(event) => setBulkLayerLabel(event.target.value)}
+                        placeholder="Conserver si vide"
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Identifiant calque cible
+                    <input
+                      type="text"
+                      value={bulkLayerId}
+                      onChange={(event) => setBulkLayerId(event.target.value)}
+                      placeholder="Conserver si vide"
+                    />
+                  </label>
+                  <div className="admin-actions-row">
+                    <button
+                      type="button"
+                      className="solid-button"
+                      disabled={isSaving}
+                      onClick={() => void handleApplyBulkUpdate()}
+                    >
+                      {isSaving ? 'Mise a jour...' : 'Appliquer en masse'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => {
+                        setBulkStatus('')
+                        setBulkColor('')
+                        setBulkCategory('')
+                        setBulkLayerLabel('')
+                        setBulkLayerId('')
+                      }}
+                    >
+                      Reinitialiser champs
+                    </button>
+                  </div>
+                </div>
+
+                <div className="editor-block">
                   <h3>Corbeille ({trashItems.length})</h3>
                   {isTrashLoading ? (
                     <p className="muted">Chargement de la corbeille...</p>
@@ -6389,6 +7553,12 @@ function App() {
                 ? null
                 : block.layers.map((layer, index) => {
                     const layerLocked = isLayerLocked(block.category, layer.id)
+                    const layerZoomKey = toLayerLockKey(block.category, layer.id)
+                    const zoomRule = layerZoomVisibility[layerZoomKey] ?? {
+                      minZoom: 10,
+                      maxZoom: 18,
+                    }
+                    const hasCustomZoomRule = layerZoomVisibility[layerZoomKey] !== undefined
                     return (
                       <div
                         key={layer.id}
@@ -6453,6 +7623,53 @@ function App() {
                             </button>
                           </div>
                         ) : null}
+                        <div className="layer-zoom-controls">
+                          <label>
+                            min
+                            <input
+                              type="number"
+                              min={10}
+                              max={18}
+                              step={1}
+                              value={zoomRule.minZoom}
+                              onChange={(event) =>
+                                handleLayerZoomChange(
+                                  block.category,
+                                  layer.id,
+                                  'minZoom',
+                                  Number.parseInt(event.target.value || '10', 10),
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            max
+                            <input
+                              type="number"
+                              min={10}
+                              max={18}
+                              step={1}
+                              value={zoomRule.maxZoom}
+                              onChange={(event) =>
+                                handleLayerZoomChange(
+                                  block.category,
+                                  layer.id,
+                                  'maxZoom',
+                                  Number.parseInt(event.target.value || '18', 10),
+                                )
+                              }
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="ghost-button mini-button"
+                            onClick={() => handleResetLayerZoom(block.category, layer.id)}
+                            disabled={!hasCustomZoomRule}
+                            title="Reinitialiser min/max zoom"
+                          >
+                            Auto
+                          </button>
+                        </div>
                       </div>
                     )
                   })}
@@ -6873,6 +8090,16 @@ function App() {
                 >
                   {isLabelOverlayEnabled ? 'Labels ON' : 'Labels'}
                 </button>
+                <button
+                  type="button"
+                  className={`ghost-button mini-button${isLabelCollisionEnabled ? ' active' : ''}`}
+                  onClick={() =>
+                    setIsLabelCollisionEnabled((current) => !current)
+                  }
+                  title="Eviter le chevauchement des labels"
+                >
+                  {isLabelCollisionEnabled ? 'Collision ON' : 'Collision OFF'}
+                </button>
               </div>
 
               <label className="map-toolbar-label small">
@@ -6895,20 +8122,25 @@ function App() {
               </p>
 
               {isLabelOverlayEnabled ? (
-                <label className="map-toolbar-label small">
-                  Labels a partir du zoom {labelMinZoom}
-                  <input
-                    type="range"
-                    min={10}
-                    max={18}
-                    step={1}
-                    className="map-toolbar-range"
-                    value={labelMinZoom}
-                    onChange={(event) =>
-                      setLabelMinZoom(Number.parseInt(event.target.value, 10))
-                    }
-                  />
-                </label>
+                <>
+                  <label className="map-toolbar-label small">
+                    Labels a partir du zoom {labelMinZoom}
+                    <input
+                      type="range"
+                      min={10}
+                      max={18}
+                      step={1}
+                      className="map-toolbar-range"
+                      value={labelMinZoom}
+                      onChange={(event) =>
+                        setLabelMinZoom(Number.parseInt(event.target.value, 10))
+                      }
+                    />
+                  </label>
+                  <p className="map-toolbar-meta">
+                    Collision labels: {isLabelCollisionEnabled ? 'active' : 'desactivee'}
+                  </p>
+                </>
               ) : null}
 
               <p className="map-toolbar-meta">
@@ -6920,59 +8152,292 @@ function App() {
                 </p>
               ) : (
                 <>
+                  <label className="map-toolbar-label small">
+                    Template
+                    <select
+                      className="map-toolbar-select"
+                      value={activeTemplateId}
+                      onChange={(event) => {
+                        const next = event.target.value
+                        if (adminMode === 'create') {
+                          setCreateTemplateId(next)
+                        } else if (adminMode === 'edit') {
+                          setEditTemplateId(next)
+                        }
+                      }}
+                    >
+                      <option value="">Choisir...</option>
+                      {styleTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="map-toolbar-actions">
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      disabled={!activeTemplateId}
+                      onClick={() => {
+                        if (!activeTemplateId) {
+                          return
+                        }
+                        if (adminMode === 'create') {
+                          applyTemplateToCreateDraft(activeTemplateId)
+                          return
+                        }
+                        if (adminMode === 'edit') {
+                          applyTemplateToEditDraft(activeTemplateId)
+                        }
+                      }}
+                    >
+                      Appliquer template
+                    </button>
+                  </div>
                   {activeStyleDraft.geometry === 'point' ? (
-                    <label className="map-toolbar-label small">
-                      Taille du point: {Math.round(activeStyleDraft.pointRadius)} px
-                      <input
-                        type="range"
-                        min={3}
-                        max={24}
-                        step={1}
-                        className="map-toolbar-range"
-                        value={activeStyleDraft.pointRadius}
-                        onChange={(event) =>
-                          applyStyleToCurrentDraft({
-                            pointRadius: Number.parseInt(event.target.value, 10),
-                          })
-                        }
-                      />
-                    </label>
+                    <>
+                      <label className="map-toolbar-label small">
+                        Taille du point: {Math.round(activeStyleDraft.pointRadius)} px
+                        <input
+                          type="range"
+                          min={3}
+                          max={24}
+                          step={1}
+                          className="map-toolbar-range"
+                          value={activeStyleDraft.pointRadius}
+                          onChange={(event) =>
+                            applyStyleToCurrentDraft({
+                              pointRadius: Number.parseInt(event.target.value, 10),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="map-toolbar-label small">
+                        Icone
+                        <select
+                          className="map-toolbar-select"
+                          value={activeStyleDraft.pointIcon}
+                          onChange={(event) =>
+                            applyStyleToCurrentDraft({
+                              pointIcon: event.target.value as PointIconId,
+                            })
+                          }
+                        >
+                          {(Object.entries(POINT_ICON_LABELS) as [
+                            PointIconId,
+                            string,
+                          ][]).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
                   ) : (
-                    <label className="map-toolbar-label small">
-                      Epaisseur: {activeStyleDraft.lineWidth.toFixed(1)} px
-                      <input
-                        type="range"
-                        min={1}
-                        max={14}
-                        step={0.5}
-                        className="map-toolbar-range"
-                        value={activeStyleDraft.lineWidth}
-                        onChange={(event) =>
-                          applyStyleToCurrentDraft({
-                            lineWidth: Number.parseFloat(event.target.value),
-                          })
-                        }
-                      />
-                    </label>
+                    <>
+                      <label className="map-toolbar-label small">
+                        Epaisseur: {activeStyleDraft.lineWidth.toFixed(1)} px
+                        <input
+                          type="range"
+                          min={1}
+                          max={14}
+                          step={0.5}
+                          className="map-toolbar-range"
+                          value={activeStyleDraft.lineWidth}
+                          onChange={(event) =>
+                            applyStyleToCurrentDraft({
+                              lineWidth: Number.parseFloat(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      {activeStyleDraft.geometry === 'line' ? (
+                        <>
+                          <label className="map-toolbar-label small">
+                            Trait
+                            <select
+                              className="map-toolbar-select"
+                              value={activeStyleDraft.lineDash}
+                              onChange={(event) =>
+                                applyStyleToCurrentDraft({
+                                  lineDash: event.target.value as LineDashStyle,
+                                })
+                              }
+                            >
+                              {(Object.entries(LINE_DASH_OPTIONS) as [
+                                LineDashStyle,
+                                string,
+                              ][]).map(([value, label]) => (
+                                <option key={value} value={value}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="map-toolbar-label small">
+                            Sens
+                            <select
+                              className="map-toolbar-select"
+                              value={activeStyleDraft.lineDirection}
+                              onChange={(event) =>
+                                applyStyleToCurrentDraft({
+                                  lineDirection: event.target.value as LineDirectionMode,
+                                })
+                              }
+                            >
+                              {(Object.entries(LINE_DIRECTION_OPTIONS) as [
+                                LineDirectionMode,
+                                string,
+                              ][]).map(([value, label]) => (
+                                <option key={value} value={value}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            className={`ghost-button mini-button${activeStyleDraft.lineArrows ? ' active' : ''}`}
+                            onClick={() =>
+                              applyStyleToCurrentDraft({
+                                lineArrows: !activeStyleDraft.lineArrows,
+                              })
+                            }
+                          >
+                            Fleches {activeStyleDraft.lineArrows ? 'ON' : 'OFF'}
+                          </button>
+                        </>
+                      ) : null}
+                    </>
                   )}
                   {activeStyleDraft.geometry === 'polygon' ? (
-                    <label className="map-toolbar-label small">
-                      Opacite surface: {activeStyleDraft.fillOpacity.toFixed(2)}
-                      <input
-                        type="range"
-                        min={0.05}
-                        max={0.95}
-                        step={0.05}
-                        className="map-toolbar-range"
-                        value={activeStyleDraft.fillOpacity}
-                        onChange={(event) =>
-                          applyStyleToCurrentDraft({
-                            fillOpacity: Number.parseFloat(event.target.value),
-                          })
-                        }
-                      />
-                    </label>
+                    <>
+                      <label className="map-toolbar-label small">
+                        Opacite surface: {activeStyleDraft.fillOpacity.toFixed(2)}
+                        <input
+                          type="range"
+                          min={0.05}
+                          max={0.95}
+                          step={0.05}
+                          className="map-toolbar-range"
+                          value={activeStyleDraft.fillOpacity}
+                          onChange={(event) =>
+                            applyStyleToCurrentDraft({
+                              fillOpacity: Number.parseFloat(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="map-toolbar-label small">
+                        Motif
+                        <select
+                          className="map-toolbar-select"
+                          value={activeStyleDraft.polygonPattern}
+                          onChange={(event) =>
+                            applyStyleToCurrentDraft({
+                              polygonPattern: event.target.value as PolygonPattern,
+                            })
+                          }
+                        >
+                          {(Object.entries(POLYGON_PATTERN_OPTIONS) as [
+                            PolygonPattern,
+                            string,
+                          ][]).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="map-toolbar-label small">
+                        Bordure
+                        <select
+                          className="map-toolbar-select"
+                          value={activeStyleDraft.polygonBorderMode}
+                          onChange={(event) =>
+                            applyStyleToCurrentDraft({
+                              polygonBorderMode:
+                                event.target.value as PolygonBorderMode,
+                            })
+                          }
+                        >
+                          {(Object.entries(POLYGON_BORDER_MODE_OPTIONS) as [
+                            PolygonBorderMode,
+                            string,
+                          ][]).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
                   ) : null}
+                  <label className="map-toolbar-label small">
+                    Label mode
+                    <select
+                      className="map-toolbar-select"
+                      value={activeStyleDraft.labelMode}
+                      onChange={(event) =>
+                        applyStyleToCurrentDraft({
+                          labelMode: event.target.value as LabelMode,
+                        })
+                      }
+                    >
+                      {(Object.entries(LABEL_MODE_OPTIONS) as [LabelMode, string][]).map(
+                        ([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label className="map-toolbar-label small">
+                    Taille label: {activeStyleDraft.labelSize}px
+                    <input
+                      type="range"
+                      min={10}
+                      max={24}
+                      step={1}
+                      className="map-toolbar-range"
+                      value={activeStyleDraft.labelSize}
+                      onChange={(event) =>
+                        applyStyleToCurrentDraft({
+                          labelSize: Number.parseInt(event.target.value, 10),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="map-toolbar-label small">
+                    Priorite label: {activeStyleDraft.labelPriority}
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      className="map-toolbar-range"
+                      value={activeStyleDraft.labelPriority}
+                      onChange={(event) =>
+                        applyStyleToCurrentDraft({
+                          labelPriority: Number.parseInt(event.target.value, 10),
+                        })
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={`ghost-button mini-button${activeStyleDraft.labelHalo ? ' active' : ''}`}
+                    onClick={() =>
+                      applyStyleToCurrentDraft({
+                        labelHalo: !activeStyleDraft.labelHalo,
+                      })
+                    }
+                  >
+                    Halo label {activeStyleDraft.labelHalo ? 'ON' : 'OFF'}
+                  </button>
                 </>
               )}
 
@@ -7221,6 +8686,10 @@ function App() {
                   className="feature-inline-label-text"
                   style={{
                     borderColor: entry.color,
+                    fontSize: `${entry.labelSize}px`,
+                    textShadow: entry.labelHalo
+                      ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff'
+                      : 'none',
                   }}
                 >
                   {entry.name}
