@@ -110,21 +110,36 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
     }
   }
 
-  const { data, error } = await supabase
-    .from('map_features')
-    .select(
-      'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order',
-    )
-    .order('category')
-    .order('layer_label')
-    .order('sort_order')
-    .order('name')
+  const pageSize = 1000
+  let offset = 0
+  const rows: MapFeatureRow[] = []
 
-  if (error) {
-    return { ok: false, error: error.message }
+  for (;;) {
+    const { data, error } = await supabase
+      .from('map_features')
+      .select(
+        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order',
+      )
+      .order('category')
+      .order('layer_label')
+      .order('sort_order')
+      .order('name')
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      return { ok: false, error: error.message }
+    }
+
+    const pageRows = (data || []) as MapFeatureRow[]
+    rows.push(...pageRows)
+
+    if (pageRows.length < pageSize) {
+      break
+    }
+
+    offset += pageSize
   }
 
-  const rows = (data || []) as MapFeatureRow[]
   const layerMap = new Map<string, LayerConfig>()
 
   for (const row of rows) {

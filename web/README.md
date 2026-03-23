@@ -45,6 +45,23 @@ Variables frontend:
 
 Si Supabase n'est pas configure ou vide, l'app bascule automatiquement sur les donnees locales importees.
 
+## Mode admin (edition carte)
+
+Le mode admin est cache derriere le bouton `Admin` dans le panneau lateral.
+
+Pre-requis:
+- Avoir execute `supabase/schema.sql` (RLS + policies actives).
+- Avoir cree au moins un utilisateur dans `Authentication > Users` sur Supabase.
+
+Fonctionnement:
+- Connexion avec email + mot de passe Supabase.
+- Session persistante cote navigateur (reconnexion automatique).
+- `Creation`: clic sur la carte pour poser un point, une ligne ou un polygone.
+- `Edition`: clic sur un element visible pour modifier metadonnees/couleur/geometrie.
+- `Suppression`: clic sur un element puis confirmation.
+
+Toutes les modifications sont ecrites dans `map_features` puis rechargees immediatement.
+
 ## Build
 
 ```bash

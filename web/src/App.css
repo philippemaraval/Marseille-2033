@@ -16,6 +16,13 @@
   margin-bottom: 18px;
 }
 
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .kicker {
   margin: 0;
   font-size: 12px;
@@ -94,7 +101,10 @@
   gap: 10px;
 }
 
-.filters-grid label {
+.filters-grid label,
+.admin-panel label,
+.auth-form label,
+.editor-block label {
   display: grid;
   gap: 5px;
   font-size: 12px;
@@ -102,13 +112,23 @@
   font-weight: 600;
 }
 
-.filters-grid select {
+.filters-grid select,
+.admin-panel select,
+.admin-panel input {
   border: 1px solid var(--border);
   border-radius: 8px;
-  height: 34px;
+  min-height: 34px;
   padding: 0 9px;
   font-size: 13px;
   background: #fff;
+  color: var(--text);
+}
+
+.filters-grid select:focus,
+.admin-panel select:focus,
+.admin-panel input:focus {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
 }
 
 .legend-list,
@@ -169,6 +189,101 @@
   color: var(--muted);
 }
 
+.ghost-button,
+.solid-button,
+.danger-button {
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.ghost-button {
+  border-color: var(--border);
+  background: #fff;
+  color: #334155;
+}
+
+.ghost-button:hover {
+  background: #f8fafc;
+}
+
+.solid-button {
+  border-color: #0f172a;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.solid-button:hover {
+  background: #1e293b;
+}
+
+.danger-button {
+  border-color: #7f1d1d;
+  background: #991b1b;
+  color: #fef2f2;
+}
+
+.danger-button:hover {
+  background: #7f1d1d;
+}
+
+.ghost-button:disabled,
+.solid-button:disabled,
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.admin-panel {
+  border-color: #cbd5e1;
+}
+
+.auth-form,
+.editor-block,
+.admin-content {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-actions-row label {
+  min-width: 150px;
+}
+
+.editor-block {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.editor-block h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-notice {
+  margin-top: 10px;
+  color: #1e293b;
+  font-weight: 600;
+}
+
 .map-pane {
   position: relative;
   background: #d4dee4;
@@ -209,5 +324,9 @@
 
   .feature-list {
     max-height: 140px;
+  }
+
+  .grid-2 {
+    grid-template-columns: 1fr;
   }
 }
