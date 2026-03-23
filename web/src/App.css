@@ -2496,3 +2496,125 @@
     grid-column: 1;
   }
 }
+
+/* Admin/layout containment pass: avoid nested panel overflow in dense admin mode */
+.panel-block,
+.admin-panel,
+.admin-content,
+.auth-form,
+.editor-block,
+.grid-2,
+.admin-actions-row,
+.admin-actions-row > *,
+.admin-actions-row label,
+.diagnostic-block,
+.diagnostic-list li,
+.versions-list li,
+.trash-list li,
+.map-toolbar,
+.map-toolbar-section,
+.map-toolbar-row,
+.map-toolbar-buttons,
+.map-toolbar-actions,
+.map-toolbar-label {
+  min-width: 0;
+}
+
+.admin-panel,
+.admin-content,
+.editor-block,
+.map-toolbar,
+.map-toolbar-section,
+.map-toolbar-buttons,
+.map-toolbar-actions {
+  max-width: 100%;
+}
+
+.admin-actions-row {
+  align-items: flex-end;
+}
+
+.admin-actions-row label {
+  flex: 1 1 190px;
+  min-width: min(190px, 100%);
+}
+
+.admin-actions-row .ghost-button,
+.admin-actions-row .solid-button,
+.admin-actions-row .danger-button {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.admin-panel input,
+.admin-panel select,
+.admin-panel textarea,
+.editor-block input,
+.editor-block select,
+.editor-block textarea,
+.map-toolbar-input,
+.map-toolbar-select,
+.map-toolbar-color {
+  width: 100%;
+  max-width: 100%;
+}
+
+.admin-panel input[type='file'] {
+  min-width: 0;
+}
+
+.diagnostic-list code,
+.versions-list strong,
+.versions-list span,
+.trash-list strong,
+.trash-list p,
+.map-toolbar-meta,
+.map-toolbar-shortcuts,
+.map-toolbar-hint {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.versions-list li,
+.trash-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.trash-list li > div {
+  min-width: 0;
+}
+
+.versions-list li span {
+  justify-self: end;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.map-toolbar-buttons .map-tool-button,
+.map-toolbar-actions .ghost-button,
+.map-toolbar-actions .solid-button,
+.map-toolbar-actions .danger-button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .admin-actions-row label {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .versions-list li,
+  .trash-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .versions-list li span {
+    justify-self: start;
+    text-align: left;
+    white-space: normal;
+  }
+}
