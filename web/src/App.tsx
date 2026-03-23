@@ -339,7 +339,7 @@ const BASE_MAPS: Record<BaseMapId, BaseMapConfig> = {
 const STATUS_LABELS: Record<StatusId, string> = {
   existant: 'Existant',
   'en cours': 'En cours',
-  propose: 'Propose',
+  propose: 'Proposé',
 }
 
 const STATUS_COLORS: Record<StatusId, string> = {
@@ -356,13 +356,13 @@ const STATUS_SORT_ORDER: Record<StatusId, number> = {
 
 const ADMIN_MODE_LABELS: Record<AdminMode, string> = {
   view: 'Lecture',
-  create: 'Creation',
-  edit: 'Edition',
+  create: 'Création',
+  edit: 'Édition',
   delete: 'Suppression',
 }
 
 const VERSION_OPERATION_LABELS: Record<string, string> = {
-  insert: 'Creation',
+  insert: 'Création',
   update: 'Modification',
   trash: 'Corbeille',
   restore: 'Restauration',
@@ -405,14 +405,14 @@ const MAX_LAYER_PRESETS = 30
 
 const POINT_ICON_LABELS: Record<PointIconId, string> = {
   dot: 'Rond',
-  pin: 'Epingle',
-  metro: 'Metro',
+  pin: 'Épingle',
+  metro: 'Métro',
   tram: 'Tram',
   bus: 'Bus',
   train: 'Train',
-  bike: 'Velo',
+  bike: 'Vélo',
   park: 'Parc',
-  star: 'Etoile',
+  star: 'Étoile',
 }
 
 const POINT_ICON_GLYPHS: Record<PointIconId, string> = {
@@ -429,21 +429,21 @@ const POINT_ICON_GLYPHS: Record<PointIconId, string> = {
 
 const LINE_DASH_OPTIONS: Record<LineDashStyle, string> = {
   solid: 'Continue',
-  dashed: 'Pointillee',
+  dashed: 'Pointillée',
   dotted: 'Points',
 }
 
 const POLYGON_PATTERN_OPTIONS: Record<PolygonPattern, string> = {
   none: 'Aucun',
   diagonal: 'Diagonal',
-  cross: 'Croise',
+  cross: 'Croisé',
   dots: 'Points',
 }
 
 const POLYGON_BORDER_MODE_OPTIONS: Record<PolygonBorderMode, string> = {
   normal: 'Normal',
-  inner: 'Interieur',
-  outer: 'Exterieur',
+  inner: 'Intérieur',
+  outer: 'Extérieur',
 }
 
 const LABEL_MODE_OPTIONS: Record<LabelMode, string> = {
@@ -486,7 +486,7 @@ const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
     mode: 'create',
     geometry: 'polygon',
   },
-  { id: 'tool-edit', label: 'Deplacer', hotkey: 'E', mode: 'edit' },
+  { id: 'tool-edit', label: 'Déplacer', hotkey: 'E', mode: 'edit' },
   { id: 'tool-delete', label: 'Supprimer', hotkey: 'D', mode: 'delete' },
 ]
 
@@ -522,7 +522,7 @@ function decodeSupabaseAnonKey(value: string | undefined): SupabaseKeyMetadata {
       projectRef: null,
       role: null,
       expIso: null,
-      error: 'Cle absente',
+      error: 'Clé absente',
     }
   }
 
@@ -560,7 +560,7 @@ function decodeSupabaseAnonKey(value: string | undefined): SupabaseKeyMetadata {
       projectRef: null,
       role: null,
       expIso: null,
-      error: 'Impossible de decoder la cle',
+      error: 'Impossible de décoder la clé',
     }
   }
 }
@@ -2346,7 +2346,7 @@ function App() {
         setDataNotice(null)
       } else if (result.ok) {
         setDataSource(`${layerMeta.mode} (fallback)`)
-        setDataNotice('Supabase est configure mais la table map_features est vide.')
+        setDataNotice('Supabase est configuré mais la table map_features est vide.')
       } else {
         setDataSource(`${layerMeta.mode} (fallback)`)
         setDataNotice(`Erreur Supabase: ${result.error}`)
@@ -3011,18 +3011,18 @@ function App() {
       {
         id: 'status-existant',
         label: 'Statut: Existant',
-        description: 'Style solide et priorite de label elevee.',
+        description: 'Style solide et priorité de label élevée.',
         patch: buildStatusTemplatePatch('existant'),
       },
       {
         id: 'status-en-cours',
         label: 'Statut: En cours',
-        description: 'Style intermediaire, tirets et priorite moyenne.',
+        description: 'Style intermédiaire, tirets et priorité moyenne.',
         patch: buildStatusTemplatePatch('en cours'),
       },
       {
         id: 'status-propose',
-        label: 'Statut: Propose',
+        label: 'Statut: Proposé',
         description: 'Style prospectif discret.',
         patch: buildStatusTemplatePatch('propose'),
       },
@@ -3031,8 +3031,8 @@ function App() {
     for (const category of categories) {
       templates.push({
         id: `category-${category}`,
-        label: `Categorie: ${category}`,
-        description: `Preset adapte a "${category}".`,
+        label: `Catégorie: ${category}`,
+        description: `Preset adapté à "${category}".`,
         patch: buildCategoryTemplatePatch(category),
       })
     }
@@ -3335,7 +3335,7 @@ function App() {
   const handleLocalUndo = useCallback(() => {
     const entry = localHistoryPast[localHistoryPast.length - 1]
     if (!entry) {
-      setAdminNotice('Aucune action a annuler.')
+      setAdminNotice('Aucune action à annuler.')
       return
     }
 
@@ -3361,7 +3361,7 @@ function App() {
   const handleLocalRedo = useCallback(() => {
     const entry = localHistoryFuture[localHistoryFuture.length - 1]
     if (!entry) {
-      setAdminNotice('Aucune action a retablir.')
+      setAdminNotice('Aucune action à rétablir.')
       return
     }
 
@@ -3540,7 +3540,7 @@ function App() {
       }))
 
       if (!nextLocked) {
-        setAdminNotice('Calque deverrouille.')
+        setAdminNotice('Calque déverrouillé.')
         return
       }
 
@@ -3557,7 +3557,7 @@ function App() {
           setAdminMode('view')
         }
       }
-      setAdminNotice('Calque verrouille: edition/suppression/duplication bloquees.')
+      setAdminNotice('Calque verrouillé: édition/suppression/duplication bloquées.')
     },
     [adminMode, lockedLayers, selectedFeature],
   )
@@ -3598,12 +3598,12 @@ function App() {
       }
       const points = layer.features.flatMap((feature) => getFeaturePoints(feature))
       if (!mapInstance || points.length === 0) {
-        setAdminNotice('Aucun element a cadrer sur ce calque.')
+        setAdminNotice('Aucun élément à cadrer sur ce calque.')
         return
       }
       const bounds = computeBoundsFromPoints(points)
       if (!bounds) {
-        setAdminNotice('Aucun element a cadrer sur ce calque.')
+        setAdminNotice('Aucun élément à cadrer sur ce calque.')
         return
       }
       if (points.length === 1) {
@@ -3643,7 +3643,7 @@ function App() {
       [preset, ...current].slice(0, MAX_LAYER_PRESETS),
     )
     setLayerPresetDraftName('')
-    setAdminNotice('Preset de calques enregistre.')
+    setAdminNotice('Preset de calques enregistré.')
   }, [activeLayers, layerPresetDraftName])
 
   const handleApplyLayerVisibilityPreset = useCallback(
@@ -3692,7 +3692,7 @@ function App() {
         setEditDraft(null)
         setEditPoints([])
         setIsRedrawingEditGeometry(false)
-        setAdminNotice('Calque verrouille: lecture seule.')
+        setAdminNotice('Calque verrouillé: lecture seule.')
         void refreshFeatureVersions(featureId)
         return false
       }
@@ -3765,7 +3765,7 @@ function App() {
     )
     const didZoom = zoomToPoints(points)
     if (!didZoom) {
-      setAdminNotice('Aucun element visible a cadrer.')
+      setAdminNotice('Aucun élément visible à cadrer.')
     }
   }, [mapVisibleFeatureEntries, zoomToPoints])
 
@@ -3782,7 +3782,7 @@ function App() {
     })
     const didZoom = zoomToPoints(points)
     if (!didZoom) {
-      setAdminNotice('Aucun element selectionne a cadrer.')
+      setAdminNotice('Aucun élément sélectionné à cadrer.')
     }
   }, [featureById, selectedFeatureId, selectedFeatureIds, zoomToPoints])
 
@@ -3802,7 +3802,7 @@ function App() {
     const query = mapSearchQuery.trim()
     if (!query) {
       setMapSearchResults([])
-      setMapSearchNotice('Saisis une adresse ou des coordonnees.')
+      setMapSearchNotice('Saisis une adresse ou des coordonnées.')
       return
     }
 
@@ -3817,7 +3817,7 @@ function App() {
           {
             id: `coord-${directCoordinates[0].toFixed(6)}-${directCoordinates[1].toFixed(6)}`,
             label: `${directCoordinates[0].toFixed(5)}, ${directCoordinates[1].toFixed(5)}`,
-            subtitle: 'Coordonnees',
+            subtitle: 'Coordonnées',
             position: directCoordinates,
             source: 'coords',
           },
@@ -3892,7 +3892,7 @@ function App() {
           (layer) => !isLayerLocked(layer.category, layer.id),
         )
         if (!firstUnlocked) {
-          setAdminNotice('Tous les calques sont verrouilles.')
+          setAdminNotice('Tous les calques sont verrouillés.')
           return
         }
         nextLayer = {
@@ -3921,7 +3921,7 @@ function App() {
       setCreatePoints([candidate.position])
       void zoomToPosition(candidate.position, 16)
       setAdminNotice(
-        `Point prepare depuis "${candidate.label}". Clique "Enregistrer" pour creer l'element.`,
+        `Point préparé depuis "${candidate.label}". Clique "Enregistrer" pour créer l'élément.`,
       )
     },
     [createDraft, isAdmin, isLayerLocked, layers, zoomToPosition],
@@ -3944,7 +3944,7 @@ function App() {
           }
         : null)
     if (!sourceView) {
-      setMapSearchNotice('Aucune vue carte disponible a enregistrer.')
+      setMapSearchNotice('Aucune vue carte disponible à enregistrer.')
       return
     }
 
@@ -3963,7 +3963,7 @@ function App() {
 
     setViewBookmarks((current) => [bookmark, ...current].slice(0, MAX_VIEW_BOOKMARKS))
     setBookmarkDraftName('')
-    setMapSearchNotice('Favori de vue ajoute.')
+    setMapSearchNotice('Favori de vue ajouté.')
   }, [bookmarkDraftName, mapInstance, mapViewport])
 
   const handleGoToViewBookmark = useCallback(
@@ -4044,14 +4044,14 @@ function App() {
 
   const handleCopyCursorCoordinates = useCallback(async () => {
     if (!cursorPosition) {
-      setNavigationNotice('Survole la carte pour copier des coordonnees.')
+      setNavigationNotice('Survole la carte pour copier des coordonnées.')
       return
     }
     const text = `${cursorPosition[0].toFixed(6)}, ${cursorPosition[1].toFixed(6)}`
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text)
-        setNavigationNotice(`Coordonnees copiees: ${text}`)
+        setNavigationNotice(`Coordonnées copiées: ${text}`)
         return
       }
       setNavigationNotice(text)
@@ -4124,7 +4124,7 @@ function App() {
           )
           didFocusEditable = focusFeatureById(featureId, 'keep')
         }
-        setAdminNotice('Selection multiple mise a jour.')
+        setAdminNotice('Sélection multiple mise à jour.')
       } else {
         didFocusEditable = focusFeatureById(featureId, 'single')
       }
@@ -4158,7 +4158,7 @@ function App() {
       event.originalEvent.stopPropagation()
       const match = featureById.get(featureId)
       if (match && isLayerLocked(match.category, match.layerId)) {
-        setAdminNotice('Calque verrouille: menu d edition indisponible.')
+        setAdminNotice("Calque verrouillé: menu d'édition indisponible.")
         return
       }
 
@@ -4187,12 +4187,12 @@ function App() {
         setMeasurePoints((current) => [...current, resolvedPosition])
         if (snap) {
           setAdminNotice(
-            `Mesure: point ajoute avec accroche ${snap.type} (${Math.round(
+            `Mesure: point ajouté avec accroche ${snap.type} (${Math.round(
               snap.distanceMeters,
             )} m).`,
           )
         } else {
-          setAdminNotice('Mesure: point ajoute.')
+          setAdminNotice('Mesure: point ajouté.')
         }
         return
       }
@@ -4201,10 +4201,10 @@ function App() {
         const targetLayerId = toLayerId(createDraft.layerId, createDraft.layerLabel)
         const targetCategory = createDraft.category.trim()
         if (isLayerLocked(targetCategory, targetLayerId)) {
-          setAdminNotice('Calque verrouille: ajoute ce point dans un autre calque.')
+          setAdminNotice('Calque verrouillé: ajoute ce point dans un autre calque.')
           return
         }
-        pushLocalHistory('Creation: ajout point')
+        pushLocalHistory('Création: ajout point')
         setCreatePoints((current) =>
           createDraft.geometry === 'point'
             ? [resolvedPosition]
@@ -4221,7 +4221,7 @@ function App() {
       }
 
       if (adminMode === 'edit' && isRedrawingEditGeometry && editDraft) {
-        pushLocalHistory('Edition: ajout point')
+        pushLocalHistory('Édition: ajout point')
         setEditPoints((current) =>
           editDraft.geometry === 'point'
             ? [resolvedPosition]
@@ -4298,7 +4298,7 @@ function App() {
       setZoneSelectionStart(position)
       setZoneSelectionCurrent(position)
       setIsZoneSelectionDragging(true)
-      setAdminNotice('Selection zone en cours: relache pour valider.')
+      setAdminNotice('Sélection zone en cours: relâche pour valider.')
     },
     [isAdmin, isZoneSelectionMode],
   )
@@ -4337,8 +4337,8 @@ function App() {
       setSnapPreview(null)
       setAdminNotice(
         uniqueIds.length > 0
-          ? `${uniqueIds.length} element(s) selectionne(s) par zone.`
-          : 'Aucun element dans la zone.',
+          ? `${uniqueIds.length} élément(s) sélectionne(s) par zone.`
+          : 'Aucun élément dans la zone.',
       )
     },
     [
@@ -4401,7 +4401,7 @@ function App() {
     event.preventDefault()
 
     if (!supabase) {
-      setAdminNotice('Supabase non configure.')
+      setAdminNotice('Supabase non configuré.')
       return
     }
 
@@ -4421,7 +4421,7 @@ function App() {
     setIsAuthenticating(false)
 
     if (error) {
-      setAdminNotice(`Connexion refusee: ${error.message}`)
+      setAdminNotice(`Connexion refusée: ${error.message}`)
       return
     }
 
@@ -4459,7 +4459,7 @@ function App() {
     setLocalHistoryFuture([])
     setTrashItems([])
     setVersionItems([])
-    setAdminNotice('Mode admin desactive.')
+    setAdminNotice('Mode admin désactivé.')
   }
 
   const handleCreateFeature = useCallback(async () => {
@@ -4474,16 +4474,16 @@ function App() {
     const name = createDraft.name.trim()
     const finalName =
       name ||
-      `Element ${new Date().toLocaleString('fr-FR', {
+      `Élément ${new Date().toLocaleString('fr-FR', {
         hour12: false,
       })}`
 
     if (!category || !layerLabel || !layerId) {
-      setAdminNotice('Categorie et calque sont obligatoires.')
+      setAdminNotice('Catégorie et calque sont obligatoires.')
       return
     }
     if (isLayerLocked(category, layerId)) {
-      setAdminNotice('Calque verrouille: impossible de creer un nouvel element.')
+      setAdminNotice('Calque verrouillé: impossible de créer un nouvel élément.')
       return
     }
 
@@ -4493,7 +4493,7 @@ function App() {
     }
 
     if (!isGeometryComplete(createDraft.geometry, createPoints)) {
-      setAdminNotice('Geometrie incomplete: ajoute plus de points sur la carte.')
+      setAdminNotice('Géométrie incomplète: ajoute plus de points sur la carte.')
       return
     }
 
@@ -4583,8 +4583,8 @@ function App() {
     setIsSaving(false)
     setAdminNotice(
       didFallbackWithoutStyle
-        ? 'Element cree. Applique web/supabase/schema.sql pour persister les styles individuels.'
-        : 'Element cree et enregistre.',
+        ? 'Élément créé. Applique web/supabase/schema.sql pour persister les styles individuels.'
+        : 'Élément créé et enregistré.',
     )
   }, [
     createDraft,
@@ -4598,7 +4598,7 @@ function App() {
 
   const handleSaveEdition = useCallback(async () => {
     if (!supabase || !isAdmin || !selectedFeatureId || !editDraft) {
-      setAdminNotice('Selectionne un element a modifier.')
+      setAdminNotice('Sélectionne un élément à modifier.')
       return
     }
 
@@ -4607,7 +4607,7 @@ function App() {
       selectedRef &&
       isLayerLocked(selectedRef.category, selectedRef.layerId)
     ) {
-      setAdminNotice('Calque verrouille: edition interdite.')
+      setAdminNotice('Calque verrouillé: édition interdite.')
       return
     }
 
@@ -4630,11 +4630,11 @@ function App() {
             ) + 1
 
     if (!name || !category || !layerLabel || !layerId) {
-      setAdminNotice('Nom, categorie et calque sont obligatoires.')
+      setAdminNotice('Nom, catégorie et calque sont obligatoires.')
       return
     }
     if (isLayerLocked(category, layerId)) {
-      setAdminNotice('Calque cible verrouille: deplace vers un calque non verrouille.')
+      setAdminNotice('Calque cible verrouillé: déplace vers un calque non verrouillé.')
       return
     }
 
@@ -4644,7 +4644,7 @@ function App() {
     }
 
     if (!isGeometryComplete(editDraft.geometry, editPoints)) {
-      setAdminNotice('Geometrie incomplete: ajoute plus de points sur la carte.')
+      setAdminNotice('Géométrie incomplète: ajoute plus de points sur la carte.')
       return
     }
     const stylePayload = toFeatureStylePayload(editDraft.geometry, editDraft)
@@ -4681,7 +4681,7 @@ function App() {
 
     if (error) {
       setIsSaving(false)
-      setAdminNotice(`Erreur edition: ${error.message}`)
+      setAdminNotice(`Erreur édition: ${error.message}`)
       return
     }
 
@@ -4692,8 +4692,8 @@ function App() {
     setIsSaving(false)
     setAdminNotice(
       didFallbackWithoutStyle
-        ? 'Element modifie. Applique web/supabase/schema.sql pour persister les styles individuels.'
-        : 'Element modifie.',
+        ? 'Élément modifié. Applique web/supabase/schema.sql pour persister les styles individuels.'
+        : 'Élément modifié.',
     )
   }, [
     editDraft,
@@ -4720,7 +4720,7 @@ function App() {
           ? [selectedFeatureId]
           : []
     if (ids.length === 0) {
-      setAdminNotice('Selectionne au moins un element.')
+      setAdminNotice('Sélectionne au moins un élément.')
       return
     }
 
@@ -4728,11 +4728,11 @@ function App() {
       .map((id) => featureById.get(id))
       .filter((value): value is FeatureRef => Boolean(value))
     if (refs.length === 0) {
-      setAdminNotice('Aucun element selectionne.')
+      setAdminNotice('Aucun élément sélectionné.')
       return
     }
     if (refs.some((ref) => isLayerLocked(ref.category, ref.layerId))) {
-      setAdminNotice('Edition en masse refusee: selection sur calque verrouille.')
+      setAdminNotice('Édition en masse refusée: sélection sur calque verrouillé.')
       return
     }
 
@@ -4749,12 +4749,12 @@ function App() {
       layerLabelPatch !== null ||
       layerIdPatch !== null
     if (!hasAnyPatch) {
-      setAdminNotice('Renseigne au moins un champ pour l edition en masse.')
+      setAdminNotice("Renseigne au moins un champ pour l'édition en masse.")
       return
     }
 
     if (colorPatch && !isHexColor(colorPatch)) {
-      setAdminNotice('Couleur invalide pour edition en masse (#RRGGBB).')
+      setAdminNotice('Couleur invalide pour édition en masse (#RRGGBB).')
       return
     }
 
@@ -4774,11 +4774,11 @@ function App() {
       const nextLayerId = toLayerId(rawLayerId, nextLayerLabel)
 
       if (!nextCategory || !nextLayerLabel || !nextLayerId) {
-        firstError = 'Categorie/calque invalide pour edition en masse.'
+        firstError = 'Catégorie/calque invalide pour édition en masse.'
         break
       }
       if (isLayerLocked(nextCategory, nextLayerId)) {
-        firstError = `Calque cible verrouille (${nextLayerLabel}).`
+        firstError = `Calque cible verrouillé (${nextLayerLabel}).`
         break
       }
 
@@ -4838,8 +4838,8 @@ function App() {
       setIsSaving(false)
       setAdminNotice(
         updated > 0
-          ? `${updated} element(s) modifies, puis erreur: ${firstError}`
-          : `Erreur edition en masse: ${firstError}`,
+          ? `${updated} élément(s) modifiés, puis erreur: ${firstError}`
+          : `Erreur édition en masse: ${firstError}`,
       )
       return
     }
@@ -4849,7 +4849,7 @@ function App() {
       await refreshFeatureVersions(selectedFeatureId)
     }
     setIsSaving(false)
-    setAdminNotice(`${updated} element(s) mis a jour en masse.`)
+    setAdminNotice(`${updated} élément(s) mis à jour en masse.`)
   }, [
     bulkCategory,
     bulkColor,
@@ -4875,7 +4875,7 @@ function App() {
 
       const uniqueIds = Array.from(new Set(ids)).filter((id) => featureById.has(id))
       if (uniqueIds.length === 0) {
-        setAdminNotice('Selectionne un element a supprimer.')
+        setAdminNotice('Sélectionne un élément à supprimer.')
         return
       }
 
@@ -4884,16 +4884,16 @@ function App() {
         return ref ? isLayerLocked(ref.category, ref.layerId) : false
       })
       if (lockedIds.length > 0) {
-        setAdminNotice('Suppression refusee: la selection contient un calque verrouille.')
+        setAdminNotice('Suppression refusée: la sélection contient un calque verrouillé.')
         return
       }
 
       const targetLabel =
         uniqueIds.length === 1
-          ? `"${featureById.get(uniqueIds[0])?.feature.name ?? 'element'}"`
-          : `${uniqueIds.length} elements`
+          ? `"${featureById.get(uniqueIds[0])?.feature.name ?? 'élément'}"`
+          : `${uniqueIds.length} éléments`
       const confirmed = window.confirm(
-        `Deplacer ${targetLabel} dans la corbeille ?`,
+        `Déplacer ${targetLabel} dans la corbeille ?`,
       )
       if (!confirmed) {
         return
@@ -4932,8 +4932,8 @@ function App() {
       setIsSaving(false)
       setAdminNotice(
         firstError
-          ? `${deletedCount} element(s) deplaces dans la corbeille (avec erreurs partielles).`
-          : `${deletedCount} element(s) deplaces dans la corbeille.`,
+          ? `${deletedCount} élément(s) déplacés dans la corbeille (avec erreurs partielles).`
+          : `${deletedCount} élément(s) déplacés dans la corbeille.`,
       )
     },
     [featureById, isAdmin, isLayerLocked, refreshTrash, syncSupabaseLayers],
@@ -4967,7 +4967,7 @@ function App() {
           ? [selectedFeatureId]
           : []
     if (ids.length === 0) {
-      setAdminNotice('Selectionne un element a dupliquer.')
+      setAdminNotice('Sélectionne un élément à dupliquer.')
       return
     }
 
@@ -4975,11 +4975,11 @@ function App() {
       .map((id) => featureById.get(id))
       .filter((value): value is FeatureRef => Boolean(value))
     if (refs.length === 0) {
-      setAdminNotice('Aucun element duplicable.')
+      setAdminNotice('Aucun élément duplicable.')
       return
     }
     if (refs.some((ref) => isLayerLocked(ref.category, ref.layerId))) {
-      setAdminNotice('Duplication refusee: la selection contient un calque verrouille.')
+      setAdminNotice('Duplication refusée: la sélection contient un calque verrouillé.')
       return
     }
 
@@ -5061,11 +5061,11 @@ function App() {
     setAdminNotice(
       duplicatedIds.length > 1
         ? didFallbackWithoutStyle
-          ? `${duplicatedIds.length} elements dupliques (styles non persistes: applique web/supabase/schema.sql).`
-          : `${duplicatedIds.length} elements dupliques.`
+          ? `${duplicatedIds.length} éléments dupliqués (styles non persistés: applique web/supabase/schema.sql).`
+          : `${duplicatedIds.length} éléments dupliqués.`
         : didFallbackWithoutStyle
-          ? 'Element duplique (style non persiste: applique web/supabase/schema.sql).'
-          : 'Element duplique.',
+          ? 'Élément dupliqué (style non persisté: applique web/supabase/schema.sql).'
+          : 'Élément dupliqué.',
     )
   }, [
     featureById,
@@ -5091,7 +5091,7 @@ function App() {
       setIsZoneSelectionDragging(false)
       setZoneSelectionStart(null)
       setZoneSelectionCurrent(null)
-      setAdminNotice('Selection zone annulee.')
+      setAdminNotice('Sélection zone annulée.')
       return
     }
     setFeatureContextMenu(null)
@@ -5101,12 +5101,12 @@ function App() {
     setIsZoneSelectionDragging(false)
     setZoneSelectionStart(null)
     setZoneSelectionCurrent(null)
-    setAdminNotice('Selection zone active: clique-glisse sur la carte.')
+    setAdminNotice('Sélection zone active: clique-glisse sur la carte.')
   }, [adminMode, isAdmin, isZoneSelectionMode])
 
   const handleClearMultiSelection = useCallback(() => {
     setSelectedFeatureIds(selectedFeatureId ? [selectedFeatureId] : [])
-    setAdminNotice('Selection multiple reinitialisee.')
+    setAdminNotice('Sélection multiple réinitialisée.')
   }, [selectedFeatureId])
 
   const handleToggleMeasureMode = useCallback(() => {
@@ -5117,7 +5117,7 @@ function App() {
     if (isMeasureMode) {
       setIsMeasureMode(false)
       setSnapPreview(null)
-      setAdminNotice('Outil mesure desactive.')
+      setAdminNotice('Outil mesure désactivé.')
       return
     }
 
@@ -5135,10 +5135,10 @@ function App() {
     if (measurePoints.length === 0) {
       return
     }
-    pushLocalHistory('Mesure: reinitialiser')
+    pushLocalHistory('Mesure: réinitialiser')
     setMeasurePoints([])
     setSnapPreview(null)
-    setAdminNotice('Mesure reinitialisee.')
+    setAdminNotice('Mesure réinitialisée.')
   }, [measurePoints.length, pushLocalHistory])
 
   const handleChangeMeasureGeometry = useCallback(
@@ -5152,7 +5152,7 @@ function App() {
       setMeasureGeometry(geometry)
       setMeasurePoints([])
       setSnapPreview(null)
-      setAdminNotice(`Mesure basculee en mode ${MEASURE_GEOMETRY_LABELS[geometry]}.`)
+      setAdminNotice(`Mesure basculée en mode ${MEASURE_GEOMETRY_LABELS[geometry]}.`)
     },
     [measureGeometry, measurePoints.length, pushLocalHistory],
   )
@@ -5160,13 +5160,13 @@ function App() {
   const handleToggleGrid = useCallback(() => {
     const next = !isGridEnabled
     setIsGridEnabled(next)
-    setAdminNotice(next ? 'Grille d aide activee.' : 'Grille d aide desactivee.')
+    setAdminNotice(next ? "Grille d'aide activée." : "Grille d'aide désactivée.")
   }, [isGridEnabled])
 
   const handleToggleSnapping = useCallback(() => {
     const next = !isSnappingEnabled
     setIsSnappingEnabled(next)
-    setAdminNotice(next ? 'Snapping actif.' : 'Snapping desactive.')
+    setAdminNotice(next ? 'Snapping actif.' : 'Snapping désactivé.')
     setSnapPreview(null)
   }, [isSnappingEnabled])
 
@@ -5339,7 +5339,7 @@ function App() {
           )
           void focusFeatureById(featureId, 'keep')
         }
-        setAdminNotice('Selection multiple mise a jour.')
+        setAdminNotice('Sélection multiple mise à jour.')
         return
       }
 
@@ -5388,7 +5388,7 @@ function App() {
     if (adminMode === 'create') {
       if (!isGeometryComplete(createDraft.geometry, createPoints)) {
         setAdminNotice(
-          `Geometrie incomplete: ${MIN_POINTS_REQUIRED[createDraft.geometry]} point(s) minimum.`,
+          `Géométrie incomplète: ${MIN_POINTS_REQUIRED[createDraft.geometry]} point(s) minimum.`,
         )
         return
       }
@@ -5399,7 +5399,7 @@ function App() {
     if (adminMode === 'edit' && isRedrawingEditGeometry && editDraft) {
       if (!isGeometryComplete(editDraft.geometry, editPoints)) {
         setAdminNotice(
-          `Geometrie incomplete: ${MIN_POINTS_REQUIRED[editDraft.geometry]} point(s) minimum.`,
+          `Géométrie incomplète: ${MIN_POINTS_REQUIRED[editDraft.geometry]} point(s) minimum.`,
         )
         return
       }
@@ -5419,7 +5419,7 @@ function App() {
       setZoneSelectionStart(null)
       setZoneSelectionCurrent(null)
       setSnapPreview(null)
-      setAdminNotice('Selection zone annulee.')
+      setAdminNotice('Sélection zone annulée.')
       return
     }
 
@@ -5430,13 +5430,13 @@ function App() {
     }
 
     if (adminMode === 'create' && createPoints.length > 0) {
-      pushLocalHistory('Creation: annuler dernier point')
+      pushLocalHistory('Création: annuler dernier point')
       setCreatePoints((current) => current.slice(0, -1))
       return
     }
 
     if (adminMode === 'edit' && isRedrawingEditGeometry && editPoints.length > 0) {
-      pushLocalHistory('Edition: annuler dernier point')
+      pushLocalHistory('Édition: annuler dernier point')
       setEditPoints((current) => current.slice(0, -1))
     }
   }
@@ -5460,7 +5460,7 @@ function App() {
   )
 
   const handleEditVertexDragStart = useCallback(() => {
-    pushLocalHistory('Edition: deplacement sommet')
+    pushLocalHistory('Édition: déplacement sommet')
   }, [pushLocalHistory])
 
   const handleEditVertexDragEnd = useCallback(
@@ -5475,7 +5475,7 @@ function App() {
           )} m).`,
         )
       } else {
-        setAdminNotice('Geometrie ajustee. Clique sur "Enregistrer" pour valider.')
+        setAdminNotice('Géométrie ajustée. Clique sur "Enregistrer" pour valider.')
       }
     },
     [findSnapResult, handleMoveEditVertex],
@@ -5486,7 +5486,7 @@ function App() {
       if (!editDraft || editDraft.geometry === 'point') {
         return
       }
-      pushLocalHistory('Edition: insertion sommet')
+      pushLocalHistory('Édition: insertion sommet')
       setEditPoints((current) => {
         if (current.length < 2) {
           return current
@@ -5496,7 +5496,7 @@ function App() {
         next.splice(safeIndex + 1, 0, position)
         return next
       })
-      setAdminNotice('Sommet ajoute. Clique sur "Enregistrer" pour valider.')
+      setAdminNotice('Sommet ajouté. Clique sur "Enregistrer" pour valider.')
     },
     [editDraft, pushLocalHistory],
   )
@@ -5508,7 +5508,7 @@ function App() {
       }
 
       const minPoints = MIN_POINTS_REQUIRED[editDraft.geometry]
-      pushLocalHistory('Edition: suppression sommet')
+      pushLocalHistory('Édition: suppression sommet')
       setEditPoints((current) => {
         if (current.length <= minPoints || index < 0 || index >= current.length) {
           return current
@@ -5524,11 +5524,11 @@ function App() {
 
   const handleToolbarToggleRedraw = useCallback(() => {
     if (!selectedFeature || !editDraft) {
-      setAdminNotice('Selectionne un element sur la carte avant de redessiner.')
+      setAdminNotice('Sélectionne un élément sur la carte avant de redessiner.')
       return
     }
     if (isLayerLocked(selectedFeature.category, selectedFeature.layerId)) {
-      setAdminNotice('Calque verrouille: redessin indisponible.')
+      setAdminNotice('Calque verrouillé: redessin indisponible.')
       return
     }
 
@@ -5540,7 +5540,7 @@ function App() {
     }
 
     setAdminMode('edit')
-    pushLocalHistory('Edition: demarrer redessin')
+    pushLocalHistory('Édition: démarrer redessin')
     setIsRedrawingEditGeometry(true)
     setEditPoints([])
     setAdminNotice(
@@ -5567,7 +5567,7 @@ function App() {
       if (createPoints.length === 0) {
         return
       }
-      pushLocalHistory('Creation: annuler dernier point')
+      pushLocalHistory('Création: annuler dernier point')
       setCreatePoints((current) => current.slice(0, -1))
       return
     }
@@ -5575,7 +5575,7 @@ function App() {
       if (editPoints.length === 0) {
         return
       }
-      pushLocalHistory('Edition: annuler dernier point')
+      pushLocalHistory('Édition: annuler dernier point')
       setEditPoints((current) => current.slice(0, -1))
     }
   }, [
@@ -5601,7 +5601,7 @@ function App() {
       if (createPoints.length === 0) {
         return
       }
-      pushLocalHistory('Creation: effacer')
+      pushLocalHistory('Création: effacer')
       setCreatePoints([])
       return
     }
@@ -5609,7 +5609,7 @@ function App() {
       if (editPoints.length === 0) {
         return
       }
-      pushLocalHistory('Edition: effacer')
+      pushLocalHistory('Édition: effacer')
       setEditPoints([])
     }
   }, [
@@ -5670,12 +5670,12 @@ function App() {
     await refreshFeatureVersions(featureId)
     setIsSaving(false)
     setAdminMode('edit')
-    setAdminNotice('Element restaure depuis la corbeille.')
+    setAdminNotice('Élément restauré depuis la corbeille.')
   }
 
   const handleUndoFeatureVersion = async () => {
     if (!isAdmin || !selectedFeatureId) {
-      setAdminNotice('Selectionne un element pour restaurer une version.')
+      setAdminNotice('Sélectionne un élément pour restaurer une version.')
       return
     }
 
@@ -5693,7 +5693,7 @@ function App() {
     await refreshTrash()
     await refreshFeatureVersions(selectedFeatureId)
     setIsSaving(false)
-    setAdminNotice('Version precedente restauree.')
+    setAdminNotice('Version précédente restaurée.')
   }
 
   const handleMoveLayer = async (
@@ -5748,7 +5748,7 @@ function App() {
 
     await syncSupabaseLayers()
     setIsSaving(false)
-    setAdminNotice('Ordre du calque mis a jour.')
+    setAdminNotice('Ordre du calque mis à jour.')
   }
 
   const handleDuplicateLayer = useCallback(
@@ -5758,7 +5758,7 @@ function App() {
         return
       }
       if (isLayerLocked(category, layerId)) {
-        setAdminNotice('Calque verrouille: duplication indisponible.')
+        setAdminNotice('Calque verrouillé: duplication indisponible.')
         return
       }
 
@@ -5848,8 +5848,8 @@ function App() {
       setIsSaving(false)
       setAdminNotice(
         didFallbackWithoutStyle
-          ? `Calque duplique (${rows.length} elements), styles non persistes: applique web/supabase/schema.sql.`
-          : `Calque duplique (${rows.length} elements).`,
+          ? `Calque dupliqué (${rows.length} éléments), styles non persistés: applique web/supabase/schema.sql.`
+          : `Calque dupliqué (${rows.length} éléments).`,
       )
     },
     [
@@ -5862,7 +5862,7 @@ function App() {
 
   const handleExportGeoJson = () => {
     if (visibleExportEntries.length === 0) {
-      setAdminNotice('Aucun element visible a exporter.')
+      setAdminNotice('Aucun élément visible à exporter.')
       return
     }
 
@@ -5873,12 +5873,12 @@ function App() {
       JSON.stringify(payload, null, 2),
       'application/geo+json;charset=utf-8',
     )
-    setAdminNotice(`Export GeoJSON cree (${visibleExportEntries.length} elements).`)
+    setAdminNotice(`Export GeoJSON créé (${visibleExportEntries.length} éléments).`)
   }
 
   const handleExportKml = () => {
     if (visibleExportEntries.length === 0) {
-      setAdminNotice('Aucun element visible a exporter.')
+      setAdminNotice('Aucun élément visible à exporter.')
       return
     }
 
@@ -5889,7 +5889,7 @@ function App() {
       payload,
       'application/vnd.google-earth.kml+xml;charset=utf-8',
     )
-    setAdminNotice(`Export KML cree (${visibleExportEntries.length} elements).`)
+    setAdminNotice(`Export KML créé (${visibleExportEntries.length} éléments).`)
   }
 
   const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -5905,10 +5905,10 @@ function App() {
       const imported = parseImportedFeatures(text, file.name)
       setImportPreviewCount(imported.length)
       if (imported.length === 0) {
-        setAdminNotice('Fichier charge mais aucun element exploitable trouve.')
+        setAdminNotice('Fichier chargé mais aucun élément exploitable trouvé.')
       } else {
         setAdminNotice(
-          `Fichier charge: ${imported.length} element(s) detecte(s).`,
+          `Fichier chargé: ${imported.length} élément(s) détecté(s).`,
         )
       }
     } catch (error) {
@@ -5924,7 +5924,7 @@ function App() {
       return
     }
     if (!importFile) {
-      setAdminNotice('Selectionne un fichier GeoJSON/KML a importer.')
+      setAdminNotice('Sélectionne un fichier GeoJSON/KML à importer.')
       return
     }
 
@@ -5932,7 +5932,7 @@ function App() {
     const category = importDraft.category.trim()
     const layerId = toLayerId(importDraft.layerId, layerLabel)
     if (!layerLabel || !category || !layerId) {
-      setAdminNotice('Categorie, identifiant calque et nom calque sont requis.')
+      setAdminNotice('Catégorie, identifiant calque et nom calque sont requis.')
       return
     }
 
@@ -5949,7 +5949,7 @@ function App() {
       const parsed = parseImportedFeatures(fileText, importFile.name)
       if (parsed.length === 0) {
         setIsImporting(false)
-        setAdminNotice('Aucun element importable detecte dans ce fichier.')
+        setAdminNotice('Aucun élément importable détecté dans ce fichier.')
         return
       }
 
@@ -6011,7 +6011,7 @@ function App() {
 
       if (rows.length === 0) {
         setIsImporting(false)
-        setAdminNotice('Aucun element valide apres normalisation.')
+        setAdminNotice('Aucun élément valide après normalisation.')
         return
       }
 
@@ -6031,7 +6031,7 @@ function App() {
       }))
       setIsImporting(false)
       setAdminNotice(
-        `Import termine: ${result.data.inserted} element(s) ajoutes.`,
+        `Import terminé: ${result.data.inserted} élément(s) ajoutés.`,
       )
     } catch (error) {
       const message =
@@ -6248,17 +6248,17 @@ function App() {
           setIsZoneSelectionDragging(false)
           setZoneSelectionStart(null)
           setZoneSelectionCurrent(null)
-          setAdminNotice('Selection zone annulee.')
+          setAdminNotice('Sélection zone annulée.')
           return
         }
         if (isMeasureMode) {
           event.preventDefault()
           if (measurePoints.length > 0) {
             setMeasurePoints([])
-            setAdminNotice('Mesure reinitialisee.')
+            setAdminNotice('Mesure réinitialisée.')
           } else {
             setIsMeasureMode(false)
-            setAdminNotice('Outil mesure desactive.')
+            setAdminNotice('Outil mesure désactivé.')
           }
           setSnapPreview(null)
           return
@@ -6620,7 +6620,7 @@ function App() {
             <div className="popup-content">
               <h4>{feature.name}</h4>
               <p>
-                <strong>Categorie:</strong> {layer.category}
+                <strong>Catégorie:</strong> {layer.category}
               </p>
               <p>
                 <strong>Calque:</strong> {layer.label}
@@ -6630,12 +6630,12 @@ function App() {
               </p>
               {layerLocked ? (
                 <p>
-                  <strong>Calque:</strong> verrouille (lecture seule).
+                  <strong>Calque:</strong> verrouillé (lecture seule).
                 </p>
               ) : null}
               {isAdmin ? (
                 <p>
-                  <strong>Admin:</strong> clique l'element pour l'editer.
+                  <strong>Admin:</strong> clique l'élément pour l'éditer.
                 </p>
               ) : null}
             </div>
@@ -6873,7 +6873,7 @@ function App() {
         ? editDraft.geometry
         : null
   const drawingGuideTitle =
-    adminMode === 'create' ? 'Creation en cours' : 'Redessin en cours'
+    adminMode === 'create' ? 'Création en cours' : 'Redessin en cours'
   const canLocalUndo = localHistoryPast.length > 0
   const canLocalRedo = localHistoryFuture.length > 0
   const activeStyleDraft =
@@ -7041,21 +7041,21 @@ function App() {
                     </code>
                   </li>
                   <li>
-                    Cle project-ref:{' '}
+                    Clé project-ref:{' '}
                     <code>{supabaseEnvDiagnostic.keyProjectRef ?? 'introuvable'}</code>
                   </li>
                   <li>
-                    Cle role: <code>{supabaseEnvDiagnostic.keyRole ?? 'inconnu'}</code>
+                    Clé role: <code>{supabaseEnvDiagnostic.keyRole ?? 'inconnu'}</code>
                   </li>
                   <li>
-                    Cle expire le:{' '}
+                    Clé expire le:{' '}
                     <code>{supabaseEnvDiagnostic.keyExpIso ?? 'inconnu'}</code>
                   </li>
                   <li>
-                    Cle empreinte: <code>{supabaseEnvDiagnostic.keyFingerprint}</code>
+                    Clé empreinte: <code>{supabaseEnvDiagnostic.keyFingerprint}</code>
                   </li>
                   <li>
-                    URL/Cle:{' '}
+                    URL/Clé:{' '}
                     <strong
                       className={
                         supabaseEnvDiagnostic.isMatch === false
@@ -7067,12 +7067,12 @@ function App() {
                         ? 'match'
                         : supabaseEnvDiagnostic.isMatch === false
                           ? 'mismatch'
-                          : 'indetermine'}
+                          : 'indéterminé'}
                     </strong>
                   </li>
                   {supabaseEnvDiagnostic.keyError ? (
                     <li>
-                      Erreur cle: <code>{supabaseEnvDiagnostic.keyError}</code>
+                      Erreur clé: <code>{supabaseEnvDiagnostic.keyError}</code>
                     </li>
                   ) : null}
                 </ul>
@@ -7081,7 +7081,7 @@ function App() {
 
             {!hasSupabase ? (
               <p className="muted">
-                Supabase n'est pas configure: edition indisponible.
+                Supabase n'est pas configuré: édition indisponible.
               </p>
             ) : !isAdmin ? (
               <>
@@ -7156,7 +7156,7 @@ function App() {
                 <div className="editor-block">
                   <h3>Exports</h3>
                   <p className="muted">
-                    Exporte les elements visibles ({visibleExportEntries.length}).
+                    Exporte les éléments visibles ({visibleExportEntries.length}).
                   </p>
                   <div className="admin-actions-row">
                     <button
@@ -7194,11 +7194,11 @@ function App() {
                     <p className="muted">
                       Fichier: <strong>{importFile.name}</strong>{' '}
                       {typeof importPreviewCount === 'number'
-                        ? `| ${importPreviewCount} element(s) detecte(s)`
+                        ? `| ${importPreviewCount} élément(s) détecté(s)`
                         : ''}
                     </p>
                   ) : (
-                    <p className="muted">Selectionne un fichier a importer.</p>
+                    <p className="muted">Sélectionne un fichier à importer.</p>
                   )}
 
                   <label>
@@ -7222,7 +7222,7 @@ function App() {
 
                   <div className="grid-2">
                     <label>
-                      Categorie cible
+                      Catégorie cible
                       <input
                         type="text"
                         value={importDraft.category}
@@ -7278,7 +7278,7 @@ function App() {
                       >
                         <option value="existant">Existant</option>
                         <option value="en cours">En cours</option>
-                        <option value="propose">Propose</option>
+                        <option value="propose">Proposé</option>
                       </select>
                     </label>
                   </div>
@@ -7309,7 +7309,7 @@ function App() {
 
                 {adminMode === 'create' ? (
                   <div className="editor-block">
-                    <h3>Creation d'un element</h3>
+                    <h3>Création d'un élément</h3>
 
                     <label>
                       Nom
@@ -7340,7 +7340,7 @@ function App() {
                         >
                           <option value="existant">Existant</option>
                           <option value="en cours">En cours</option>
-                          <option value="propose">Propose</option>
+                          <option value="propose">Proposé</option>
                         </select>
                       </label>
 
@@ -7360,7 +7360,7 @@ function App() {
                     </div>
 
                     <label>
-                      Type de geometrie
+                      Type de géométrie
                       <select
                         value={createDraft.geometry}
                         onChange={(event) => {
@@ -7460,7 +7460,7 @@ function App() {
 
                     <div className="grid-2">
                       <label>
-                        Categorie
+                        Catégorie
                         <input
                           type="text"
                           value={createDraft.category}
@@ -7522,7 +7522,7 @@ function App() {
                         onClick={handleToolbarClearPoints}
                         disabled={createPoints.length === 0}
                       >
-                        Reinitialiser
+                        Réinitialiser
                       </button>
                     </div>
 
@@ -7532,17 +7532,17 @@ function App() {
                       disabled={isSaving}
                       onClick={handleCreateFeature}
                     >
-                      {isSaving ? 'Sauvegarde...' : 'Creer l\'element'}
+                      {isSaving ? 'Sauvegarde...' : 'Créer l\'élément'}
                     </button>
                   </div>
                 ) : null}
 
                 {adminMode === 'edit' ? (
                   <div className="editor-block">
-                    <h3>Edition</h3>
+                    <h3>Édition</h3>
                     {!selectedFeature || !editDraft ? (
                       <p className="muted">
-                        Clique un element sur la carte pour le modifier.
+                        Clique un élément sur la carte pour le modifier.
                       </p>
                     ) : (
                       <>
@@ -7574,7 +7574,7 @@ function App() {
                             >
                               <option value="existant">Existant</option>
                               <option value="en cours">En cours</option>
-                              <option value="propose">Propose</option>
+                              <option value="propose">Proposé</option>
                             </select>
                           </label>
 
@@ -7614,7 +7614,7 @@ function App() {
 
                         <div className="grid-2">
                           <label>
-                            Categorie
+                            Catégorie
                             <input
                               type="text"
                               value={editDraft.category}
@@ -7657,7 +7657,7 @@ function App() {
                         </label>
 
                         <p className="muted">
-                          Geometrie: {editDraft.geometry} | points: {editPoints.length}
+                          Géométrie: {editDraft.geometry} | points: {editPoints.length}
                         </p>
                         {editDraft.geometry === 'point' ? (
                           <label>
@@ -7733,7 +7733,7 @@ function App() {
                               setEditPoints([])
                             }}
                           >
-                            Redessiner geometrie
+                            Redessiner géométrie
                           </button>
                           <button
                             type="button"
@@ -7751,7 +7751,7 @@ function App() {
                               setEditPoints(getFeaturePoints(selectedFeature.feature))
                             }}
                           >
-                            Restaurer geometrie
+                            Restaurer géométrie
                           </button>
                         </div>
 
@@ -7812,12 +7812,12 @@ function App() {
                     <h3>Suppression</h3>
                     {!selectedFeature ? (
                       <p className="muted">
-                        Clique un element sur la carte pour le supprimer.
+                        Clique un élément sur la carte pour le supprimer.
                       </p>
                     ) : (
                       <>
                         <p className="muted">
-                          Element selectionne: <strong>{selectedFeature.feature.name}</strong>
+                          Élément sélectionné: <strong>{selectedFeature.feature.name}</strong>
                         </p>
                         <button
                           type="button"
@@ -7825,7 +7825,7 @@ function App() {
                           disabled={isSaving}
                           onClick={handleDeleteFeature}
                         >
-                          {isSaving ? 'Suppression...' : 'Supprimer l\'element'}
+                          {isSaving ? 'Suppression...' : 'Supprimer l\'élément'}
                         </button>
                       </>
                     )}
@@ -7833,9 +7833,9 @@ function App() {
                 ) : null}
 
                 <div className="editor-block">
-                  <h3>Edition en masse</h3>
+                  <h3>Édition en masse</h3>
                   <p className="muted">
-                    Selection:
+                    Sélection:
                     {' '}
                     <strong>
                       {selectedFeatureIds.length > 0
@@ -7844,7 +7844,7 @@ function App() {
                           ? 1
                           : 0}
                     </strong>{' '}
-                    element(s)
+                    élément(s)
                   </p>
                   <div className="grid-2">
                     <label>
@@ -7858,7 +7858,7 @@ function App() {
                         <option value="">Conserver</option>
                         <option value="existant">Existant</option>
                         <option value="en cours">En cours</option>
-                        <option value="propose">Propose</option>
+                        <option value="propose">Proposé</option>
                       </select>
                     </label>
                     <label>
@@ -7873,7 +7873,7 @@ function App() {
                   </div>
                   <div className="grid-2">
                     <label>
-                      Categorie cible
+                      Catégorie cible
                       <input
                         type="text"
                         value={bulkCategory}
@@ -7907,7 +7907,7 @@ function App() {
                       disabled={isSaving}
                       onClick={() => void handleApplyBulkUpdate()}
                     >
-                      {isSaving ? 'Mise a jour...' : 'Appliquer en masse'}
+                      {isSaving ? 'Mise à jour...' : 'Appliquer en masse'}
                     </button>
                     <button
                       type="button"
@@ -7920,7 +7920,7 @@ function App() {
                         setBulkLayerId('')
                       }}
                     >
-                      Reinitialiser champs
+                      Réinitialiser champs
                     </button>
                   </div>
                 </div>
@@ -7995,12 +7995,12 @@ function App() {
                 <option value="all">Tous</option>
                 <option value="existant">Existant</option>
                 <option value="en cours">En cours</option>
-                <option value="propose">Propose</option>
+                <option value="propose">Proposé</option>
               </select>
             </label>
 
             <label>
-              Categorie
+              Catégorie
               <select
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
@@ -8015,7 +8015,7 @@ function App() {
             </label>
 
             <label>
-              Geometrie
+              Géométrie
               <select
                 value={geometryFilter}
                 onChange={(event) =>
@@ -8056,7 +8056,7 @@ function App() {
               className={`ghost-button mini-button${statusFilter === 'propose' ? ' active' : ''}`}
               onClick={() => setStatusFilter('propose')}
             >
-              Propose ({statusQuickCounts.propose})
+              Proposé ({statusQuickCounts.propose})
             </button>
           </div>
         </section>
@@ -8087,7 +8087,7 @@ function App() {
                 selectedFeatureIds.length === 0 && selectedFeatureId === null
               }
             >
-              Cadrer selection
+              Cadrer sélection
             </button>
             <button
               type="button"
@@ -8118,7 +8118,7 @@ function App() {
               type="text"
               value={mapSearchQuery}
               onChange={(event) => setMapSearchQuery(event.target.value)}
-              placeholder="Adresse ou coordonnees (43.2965, 5.3698)"
+              placeholder="Adresse ou coordonnées (43.2965, 5.3698)"
             />
             <button type="submit" className="ghost-button mini-button" disabled={isSearchingMap}>
               {isSearchingMap ? '...' : 'Rechercher'}
@@ -8186,7 +8186,7 @@ function App() {
                     type="button"
                     className="bookmark-go"
                     onClick={() => handleGoToViewBookmark(bookmark)}
-                    title="Aller a ce favori"
+                    title="Aller à ce favori"
                   >
                     {bookmark.name}
                   </button>
@@ -8219,21 +8219,21 @@ function App() {
               className="ghost-button mini-button"
               onClick={handleDeactivateAllLayers}
             >
-              Tout desactiver
+              Tout désactiver
             </button>
             <button
               type="button"
               className="ghost-button mini-button"
               onClick={handleExpandAllLayerFolders}
             >
-              Deplier categories
+              Déplier catégories
             </button>
             <button
               type="button"
               className="ghost-button mini-button"
               onClick={handleCollapseAllLayerFolders}
             >
-              Replier categories
+              Replier catégories
             </button>
           </div>
           <div className="layer-preset-tools">
@@ -8243,7 +8243,7 @@ function App() {
                 type="text"
                 value={layerPanelSearchQuery}
                 onChange={(event) => setLayerPanelSearchQuery(event.target.value)}
-                placeholder="Nom de calque ou categorie..."
+                placeholder="Nom de calque ou catégorie..."
               />
             </label>
             <label>
@@ -8294,7 +8294,7 @@ function App() {
             <p className="muted">Aucun preset de calques.</p>
           )}
           {layersByCategory.length === 0 ? (
-            <p className="muted">Aucun calque ne correspond a ta recherche.</p>
+            <p className="muted">Aucun calque ne correspond à ta recherche.</p>
           ) : null}
           {layersByCategory.map((block) => (
             <div key={block.category} className="layer-group">
@@ -8336,12 +8336,12 @@ function App() {
                           />
                           <span>
                             {layer.label}
-                            {layerLocked ? ' (verrouille)' : ''}
+                            {layerLocked ? ' (verrouillé)' : ''}
                           </span>
                         </label>
                         <p className="layer-row-meta">
                           {layerVisibleCountById.get(layer.id) ?? 0}/{layer.features.length}{' '}
-                          element(s) avec filtres
+                          élément(s) avec filtres
                         </p>
                         {isAdmin ? (
                           <div className="layer-order-actions">
@@ -8368,7 +8368,7 @@ function App() {
                                 toggleLayerLock(block.category, layer.id)
                               }
                               disabled={isSaving}
-                              title={layerLocked ? 'Deverrouiller' : 'Verrouiller'}
+                              title={layerLocked ? 'Déverrouiller' : 'Verrouiller'}
                             >
                               {layerLocked ? 'Deverr.' : 'Verrou.'}
                             </button>
@@ -8449,7 +8449,7 @@ function App() {
                             className="ghost-button mini-button"
                             onClick={() => handleResetLayerZoom(block.category, layer.id)}
                             disabled={!hasCustomZoomRule}
-                            title="Reinitialiser min/max zoom"
+                            title="Réinitialiser min/max zoom"
                           >
                             Auto
                           </button>
@@ -8477,7 +8477,7 @@ function App() {
                             className="ghost-button mini-button"
                             onClick={() => handleResetLayerOpacity(block.category, layer.id)}
                             disabled={!hasCustomOpacity}
-                            title="Reinitialiser opacite du calque"
+                            title="Réinitialiser opacité du calque"
                           >
                             100%
                           </button>
@@ -8518,7 +8518,7 @@ function App() {
                 type="text"
                 value={featureSearchQuery}
                 onChange={(event) => setFeatureSearchQuery(event.target.value)}
-                placeholder="Nom, calque, categorie..."
+                placeholder="Nom, calque, catégorie..."
               />
             </label>
             <label>
@@ -8529,10 +8529,10 @@ function App() {
                   setFeatureSortMode(event.target.value as VisibleFeatureSortMode)
                 }
               >
-                <option value="alpha">Alphabetique</option>
+                <option value="alpha">Alphabétique</option>
                 <option value="status">Par statut</option>
                 <option value="layer">Par calque</option>
-                <option value="category">Par categorie</option>
+                <option value="category">Par catégorie</option>
               </select>
             </label>
           </div>
@@ -8546,7 +8546,7 @@ function App() {
             <p className="muted">
               {mapVisibleFeatureEntries.length === 0
                 ? 'Active un calque pour commencer.'
-                : 'Aucun element ne correspond a la recherche.'}
+                : 'Aucun élément ne correspond à la recherche.'}
             </p>
           ) : (
             <ul className="feature-list">
@@ -8556,7 +8556,7 @@ function App() {
                     type="button"
                     className="feature-list-item-button"
                     onClick={() => handleVisibleFeatureFocus(feature.id)}
-                    title="Zoomer sur cet element"
+                    title="Zoomer sur cet élément"
                   >
                     <span
                       className="legend-dot"
@@ -8589,7 +8589,7 @@ function App() {
             className="ghost-button mini-button"
             onClick={() => setIsPresentationMode((current) => !current)}
           >
-            {isPresentationMode ? 'Quitter presentation' : 'Mode presentation'}
+            {isPresentationMode ? 'Quitter présentation' : 'Mode présentation'}
           </button>
           {!showWelcomeHint ? (
             <button
@@ -8605,7 +8605,7 @@ function App() {
           <div className="map-welcome-hint" role="status" aria-live="polite">
             <p className="map-welcome-title">Astuces rapides</p>
             <p className="map-welcome-text">
-              Active des calques, clique un element pour le focus, puis utilise "Copier lien"
+              Active des calques, clique un élément pour le focus, puis utilise "Copier lien"
               pour partager exactement cette vue.
             </p>
             <div className="map-welcome-actions">
@@ -8648,7 +8648,7 @@ function App() {
               {isMeasureMode
                 ? `Mesure ${MEASURE_GEOMETRY_LABELS[measureGeometry]}`
                 : adminMode === 'create'
-                ? `Creation ${DRAW_GEOMETRY_LABELS[createDraft.geometry]}`
+                ? `Création ${DRAW_GEOMETRY_LABELS[createDraft.geometry]}`
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
             <p className="map-toolbar-shortcuts">
@@ -8696,7 +8696,7 @@ function App() {
                     >
                       <option value="existant">Existant</option>
                       <option value="en cours">En cours</option>
-                      <option value="propose">Propose</option>
+                      <option value="propose">Proposé</option>
                     </select>
                   </label>
                   <label className="map-toolbar-label small">
@@ -8754,7 +8754,7 @@ function App() {
                 {!selectedFeature || !editDraft ? (
                   <>
                     <p className="map-toolbar-meta">
-                      Clique un element sur la carte pour l'editer.
+                      Clique un élément sur la carte pour l'éditer.
                     </p>
                     <div className="map-toolbar-actions">
                       <button
@@ -8762,7 +8762,7 @@ function App() {
                         className="ghost-button mini-button"
                         onClick={() => void handleDuplicateSelection()}
                         disabled={isSaving || !selectedFeatureId}
-                        title="Dupliquer rapidement la selection"
+                        title="Dupliquer rapidement la sélection"
                       >
                         Dupliquer
                       </button>
@@ -8770,31 +8770,31 @@ function App() {
                         type="button"
                         className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
                         onClick={handleToggleZoneSelection}
-                        title="Selection par zone (Z)"
+                        title="Sélection par zone (Z)"
                       >
-                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Sélection zone'}
                       </button>
                     </div>
                     <p className="map-toolbar-meta">
-                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="map-toolbar-meta">
-                      Selection: <strong>{selectedFeature.feature.name}</strong>
+                      Sélection: <strong>{selectedFeature.feature.name}</strong>
                     </p>
                     <p className="map-toolbar-meta">
-                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
                     </p>
                     <div className="map-toolbar-actions">
                       <button
                         type="button"
                         className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
                         onClick={handleToggleZoneSelection}
-                        title="Selection par zone (Z)"
+                        title="Sélection par zone (Z)"
                       >
-                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Sélection zone'}
                       </button>
                       <button
                         type="button"
@@ -8802,7 +8802,7 @@ function App() {
                         onClick={handleToolbarToggleRedraw}
                         title="Basculer redessin (R)"
                       >
-                        {isRedrawingEditGeometry ? 'Arreter redessin' : 'Redessiner'}
+                        {isRedrawingEditGeometry ? 'Arrêter redessin' : 'Redessiner'}
                       </button>
                       {isRedrawingEditGeometry ? (
                         <button
@@ -8840,7 +8840,7 @@ function App() {
                       </p>
                     ) : null}
                     <p className="map-toolbar-meta">
-                      Selection multiple: Shift+clic ou clique-glisse avec "Selection zone".
+                      Sélection multiple: Shift+clic ou clique-glisse avec "Sélection zone".
                     </p>
                     {isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">
@@ -8857,38 +8857,38 @@ function App() {
                 {!selectedFeature ? (
                   <>
                     <p className="map-toolbar-meta">
-                      Clique un element sur la carte pour le supprimer.
+                      Clique un élément sur la carte pour le supprimer.
                     </p>
                     <div className="map-toolbar-actions">
                       <button
                         type="button"
                         className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
                         onClick={handleToggleZoneSelection}
-                        title="Selection par zone (Z)"
+                        title="Sélection par zone (Z)"
                       >
-                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Sélection zone'}
                       </button>
                     </div>
                     <p className="map-toolbar-meta">
-                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="map-toolbar-meta">
-                      Selection: <strong>{selectedFeature.feature.name}</strong>
+                      Sélection: <strong>{selectedFeature.feature.name}</strong>
                     </p>
                     <p className="map-toolbar-meta">
-                      Multi-selection: <strong>{selectedFeatureIds.length}</strong> element(s)
+                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
                     </p>
                     <div className="map-toolbar-actions">
                       <button
                         type="button"
                         className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
                         onClick={handleToggleZoneSelection}
-                        title="Selection par zone (Z)"
+                        title="Sélection par zone (Z)"
                       >
-                        {isZoneSelectionMode ? 'Annuler zone' : 'Selection zone'}
+                        {isZoneSelectionMode ? 'Annuler zone' : 'Sélection zone'}
                       </button>
                       <button
                         type="button"
@@ -8904,7 +8904,7 @@ function App() {
                       </button>
                     </div>
                     <p className="map-toolbar-meta">
-                      Shift+clic ajoute/retire un element. Zone: clique-glisse.
+                      Shift+clic ajoute/retire un élément. Zone: clique-glisse.
                     </p>
                   </>
                 )}
@@ -8928,7 +8928,7 @@ function App() {
                   type="button"
                   className={`ghost-button mini-button${isSnappingEnabled ? ' active' : ''}`}
                   onClick={handleToggleSnapping}
-                  title="Snapping magnetique (X)"
+                  title="Snapping magnétique (X)"
                 >
                   {isSnappingEnabled ? 'Snap ON' : 'Snap OFF'}
                 </button>
@@ -8990,7 +8990,7 @@ function App() {
               {isLabelOverlayEnabled ? (
                 <>
                   <label className="map-toolbar-label small">
-                    Labels a partir du zoom {labelMinZoom}
+                    Labels à partir du zoom {labelMinZoom}
                     <input
                       type="range"
                       min={10}
@@ -9004,7 +9004,7 @@ function App() {
                     />
                   </label>
                   <p className="map-toolbar-meta">
-                    Collision labels: {isLabelCollisionEnabled ? 'active' : 'desactivee'}
+                    Collision labels: {isLabelCollisionEnabled ? 'active' : 'désactivée'}
                   </p>
                 </>
               ) : null}
@@ -9014,7 +9014,7 @@ function App() {
               </p>
               {!canEditStyleIndividually || !activeStyleDraft ? (
                 <p className="map-toolbar-meta">
-                  Selectionne ou cree un element pour regler son style.
+                  Sélectionne ou crée un élément pour régler son style.
                 </p>
               ) : (
                 <>
@@ -9172,7 +9172,7 @@ function App() {
                               })
                             }
                           >
-                            Fleches {activeStyleDraft.lineArrows ? 'ON' : 'OFF'}
+                            Flèches {activeStyleDraft.lineArrows ? 'ON' : 'OFF'}
                           </button>
                         </>
                       ) : null}
@@ -9355,7 +9355,7 @@ function App() {
                       onClick={handleResetMeasure}
                       disabled={measurePoints.length === 0}
                     >
-                      Reinitialiser
+                      Réinitialiser
                     </button>
                   </div>
                 </>
@@ -9424,7 +9424,7 @@ function App() {
           <span>
             {cursorPosition
               ? `${cursorPosition[0].toFixed(5)}, ${cursorPosition[1].toFixed(5)}`
-              : 'Survole pour lire les coordonnees'}
+              : 'Survole pour lire les coordonnées'}
           </span>
         </div>
         {isAdmin && !isPresentationMode && isShortcutHelpOpen ? (
@@ -9446,14 +9446,14 @@ function App() {
                 <li><kbd>1</kbd> Point</li>
                 <li><kbd>2</kbd> Ligne</li>
                 <li><kbd>3</kbd> Polygone</li>
-                <li><kbd>E</kbd> Mode edition</li>
+                <li><kbd>E</kbd> Mode édition</li>
                 <li><kbd>D</kbd> Mode suppression</li>
-                <li><kbd>R</kbd> Redessiner (edition)</li>
-                <li><kbd>Z</kbd> Selection par zone</li>
+                <li><kbd>R</kbd> Redessiner (édition)</li>
+                <li><kbd>Z</kbd> Sélection par zone</li>
                 <li><kbd>M</kbd> Outil mesure</li>
                 <li><kbd>G</kbd> Grille</li>
                 <li><kbd>X</kbd> Snapping</li>
-                <li><kbd>P</kbd> Mode presentation</li>
+                <li><kbd>P</kbd> Mode présentation</li>
                 <li><kbd>?</kbd> Ouvrir/fermer cette aide</li>
                 <li><kbd>Enter</kbd> Valider</li>
                 <li><kbd>Backspace</kbd> Annuler point</li>
@@ -9520,21 +9520,21 @@ function App() {
               className="feature-context-menu-item"
               onClick={() => void handleContextMenuAction('edit')}
             >
-              Editer cet element
+              Éditer cet élément
             </button>
             <button
               type="button"
               className="feature-context-menu-item"
               onClick={() => void handleContextMenuAction('toggle')}
             >
-              Ajouter/retirer de la selection
+              Ajouter/retirer de la sélection
             </button>
             <button
               type="button"
               className="feature-context-menu-item"
               onClick={() => void handleContextMenuAction('duplicate')}
             >
-              Dupliquer cet element
+              Dupliquer cet élément
             </button>
             <button
               type="button"

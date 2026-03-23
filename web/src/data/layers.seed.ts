@@ -3,12 +3,12 @@ import type { LayerConfig } from '../types/map'
 export const seedLayers: LayerConfig[] = [
   {
     id: 'transport_metro',
-    label: 'Transports > Metro (lignes)',
+    label: 'Transports > Métro (lignes)',
     category: 'transports en commun',
     features: [
       {
         id: 'seed-metro-1',
-        name: 'Metro M1 (exemple)',
+        name: 'Métro M1 (exemple)',
         status: 'existant',
         color: '#0055a4',
         geometry: 'line',
