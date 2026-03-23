@@ -1,19 +1,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 
 :root {
-  --text: #0f172a;
-  --muted: #4b556f;
-  --bg: #e6edf6;
-  --panel-bg: rgba(253, 254, 255, 0.88);
-  --border: rgba(125, 148, 178, 0.36);
+  --text: #0f1724;
+  --muted: #55627a;
+  --bg: #edf2f8;
+  --panel-bg: rgba(252, 254, 255, 0.92);
+  --border: rgba(120, 136, 162, 0.28);
   --surface-strong: #ffffff;
-  --surface-soft: rgba(244, 249, 255, 0.88);
-  --ring: rgba(56, 97, 159, 0.28);
-  --shadow-soft: 0 12px 28px rgba(19, 32, 53, 0.08);
-  --shadow-strong: 0 20px 48px rgba(19, 32, 53, 0.16);
+  --surface-soft: rgba(246, 250, 255, 0.92);
+  --ring: rgba(58, 100, 166, 0.26);
+  --shadow-soft: 0 10px 24px rgba(15, 25, 44, 0.07);
+  --shadow-strong: 0 18px 42px rgba(15, 25, 44, 0.15);
 
   font-family: 'Manrope', 'IBM Plex Sans', 'Nunito Sans', sans-serif;
-  line-height: 1.5;
+  line-height: 1.42;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -36,9 +36,9 @@ body {
   margin: 0;
   color: var(--text);
   background:
-    radial-gradient(circle at 12% 14%, rgba(109, 168, 255, 0.23), transparent 42%),
-    radial-gradient(circle at 92% 82%, rgba(31, 122, 176, 0.2), transparent 45%),
-    linear-gradient(145deg, #eef3fb 0%, #e5edf7 45%, #dee8f4 100%);
+    radial-gradient(circle at 16% 10%, rgba(130, 164, 214, 0.16), transparent 34%),
+    radial-gradient(circle at 88% 84%, rgba(118, 148, 196, 0.13), transparent 32%),
+    linear-gradient(152deg, #f3f6fb 0%, #ebf1f8 54%, #e6edf7 100%);
   background-attachment: fixed;
 }
 
@@ -53,7 +53,7 @@ h1,
 h2,
 h3 {
   font-family: 'Space Grotesk', 'Manrope', 'Avenir Next', sans-serif;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.016em;
 }
 
 button,
