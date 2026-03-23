@@ -1,7 +1,7 @@
 import type { LayerConfig } from '../types/map'
 
 export const osmImportMeta = {
-  "generatedAt": "2026-03-23T10:23:00.623Z",
+  "generatedAt": "2026-03-23T11:06:13.956Z",
   "bbox": "43.02,4.95,43.62,5.86",
   "overpassUrl": "https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter,https://overpass.openstreetmap.fr/api/interpreter"
 } as const
@@ -11256,8 +11256,8 @@ export const osmLayers: LayerConfig[] = [
             5.551409
           ],
           [
-            43.280202,
-            5.551461
+            43.280089,
+            5.551458
           ],
           [
             43.28033,
@@ -11276,16 +11276,16 @@ export const osmLayers: LayerConfig[] = [
             5.550342
           ],
           [
-            43.281732,
-            5.550112
+            43.281576,
+            5.550266
           ],
           [
             43.282186,
             5.549664
           ],
           [
-            43.282463,
-            5.549419
+            43.282329,
+            5.549527
           ],
           [
             43.282718,
@@ -11296,24 +11296,24 @@ export const osmLayers: LayerConfig[] = [
             5.549014
           ],
           [
-            43.28344,
-            5.548714
+            43.283322,
+            5.548872
           ],
           [
             43.283547,
             5.548474
           ],
           [
-            43.283759,
-            5.548002
+            43.283625,
+            5.548263
           ],
           [
             43.283985,
             5.547659
           ],
           [
-            43.284177,
-            5.547421
+            43.28412,
+            5.54748
           ],
           [
             43.284243,
@@ -11324,80 +11324,84 @@ export const osmLayers: LayerConfig[] = [
             5.547382
           ],
           [
-            43.284406,
-            5.5474
+            43.284367,
+            5.547386
           ],
           [
             43.284447,
             5.547429
           ],
           [
-            43.284498,
-            5.547488
+            43.284478,
+            5.547462
           ],
           [
             43.284509,
             5.547503
           ],
           [
-            43.284597,
-            5.547776
+            43.284551,
+            5.547586
           ],
           [
-            43.284654,
-            5.548035
+            43.284608,
+            5.547829
           ],
           [
             43.284703,
             5.548259
           ],
           [
-            43.28475,
-            5.548555
+            43.284744,
+            5.548495
           ],
           [
             43.284776,
             5.548863
           ],
           [
-            43.284913,
-            5.550374
+            43.284816,
+            5.549432
+          ],
+          [
+            43.284966,
+            5.550898
           ],
           [
             43.285211,
             5.553303
           ],
           [
-            43.285307,
-            5.553698
-          ],
-          [
-            43.285417,
-            5.55401
+            43.285396,
+            5.553966
           ],
           [
             43.285577,
             5.554354
           ],
           [
-            43.285746,
-            5.554704
+            43.285628,
+            5.55446
+          ],
+          [
+            43.28602,
+            5.555208
           ],
           [
             43.286183,
             5.555407
           ],
           [
-            43.286367,
-            5.555592
+            43.286541,
+            5.555749
           ],
           [
             43.286676,
             5.555854
           ],
           [
-            43.286833,
-            5.555957
+            43.287139,
+            5.556106
           ],
           [
             43.28774,
@@ -11408,56 +11412,52 @@ export const osmLayers: LayerConfig[] = [
             5.556548
           ],
           [
-            43.288165,
-            5.55662
+            43.288368,
+            5.556736
           ],
           [
             43.288621,
             5.556857
           ],
           [
-            43.288859,
-            5.556979
+            43.289033,
+            5.55712
           ],
           [
-            43.289106,
-            5.557208
-          ],
-          [
-            43.289299,
-            5.55748
+            43.289195,
+            5.557315
           ],
           [
             43.289363,
             5.557608
           ],
           [
-            43.289574,
-            5.558215
+            43.289459,
+            5.557842
           ],
           [
             43.289616,
             5.558388
           ],
           [
-            43.289692,
-            5.558707
+            43.289741,
+            5.558906
           ],
           [
             43.289794,
             5.55903
           ],
           [
-            43.289814,
-            5.559078
+            43.289903,
+            5.559243
           ],
           [
             43.290069,
             5.559452
           ],
           [
-            43.290295,
-            5.559699
+            43.29047,
+            5.559894
           ],
           [
             43.290639,
@@ -11468,24 +11468,24 @@ export const osmLayers: LayerConfig[] = [
             5.560489
           ],
           [
-            43.291701,
-            5.561249
+            43.291757,
+            5.561312
           ],
           [
             43.292248,
             5.561852
           ],
           [
-            43.292659,
-            5.562313
+            43.292726,
+            5.562404
           ],
           [
             43.292821,
             5.562554
           ],
           [
-            43.292942,
-            5.562768
+            43.293018,
+            5.562903
           ],
           [
             43.293146,
@@ -11496,16 +11496,16 @@ export const osmLayers: LayerConfig[] = [
             5.563279
           ],
           [
-            43.293517,
-            5.56339
+            43.293892,
+            5.563592
           ],
           [
             43.29439,
             5.563877
           ],
           [
-            43.294456,
-            5.563911
+            43.294486,
+            5.563927
           ],
           [
             43.294707,
@@ -11524,8 +11524,8 @@ export const osmLayers: LayerConfig[] = [
             5.564214
           ],
           [
-            43.295448,
-            5.564237
+            43.295491,
+            5.564281
           ],
           [
             43.295538,
@@ -11585,8 +11585,8 @@ export const osmLayers: LayerConfig[] = [
             5.564308
           ],
           [
-            43.295461,
-            5.564198
+            43.295505,
+            5.564242
           ],
           [
             43.295418,
@@ -11597,32 +11597,32 @@ export const osmLayers: LayerConfig[] = [
             5.564123
           ],
           [
-            43.294799,
-            5.564018
+            43.294957,
+            5.564075
           ],
           [
-            43.294784,
-            5.564012
+            43.294711,
+            5.563986
           ],
           [
             43.294464,
             5.563867
           ],
           [
-            43.294402,
-            5.563837
+            43.293903,
+            5.563552
           ],
           [
-            43.293529,
-            5.56335
+            43.293337,
+            5.563238
           ],
           [
             43.293238,
             5.563159
           ],
           [
-            43.293221,
-            5.563139
+            43.293168,
+            5.563076
           ],
           [
             43.293043,
@@ -11641,8 +11641,8 @@ export const osmLayers: LayerConfig[] = [
             5.561818
           ],
           [
-            43.291781,
-            5.561282
+            43.291725,
+            5.561221
           ],
           [
             43.291034,
@@ -11673,28 +11673,24 @@ export const osmLayers: LayerConfig[] = [
             5.558693
           ],
           [
-            43.289676,
-            5.558522
+            43.289632,
+            5.558345
           ],
           [
-            43.289589,
-            5.558172
+            43.289473,
+            5.557798
           ],
           [
             43.289325,
             5.557471
           ],
           [
-            43.289202,
-            5.557273
-          ],
-          [
             43.289043,
             5.557086
           ],
           [
-            43.288869,
-            5.556945
+            43.288402,
+            5.556703
           ],
           [
             43.288176,
@@ -11733,8 +11729,8 @@ export const osmLayers: LayerConfig[] = [
             5.55433
           ],
           [
-            43.285424,
-            5.553945
+            43.285447,
+            5.553995
           ],
           [
             43.285336,
@@ -11745,16 +11741,16 @@ export const osmLayers: LayerConfig[] = [
             5.550892
           ],
           [
-            43.284848,
-            5.549427
+            43.284906,
+            5.55
           ],
           [
             43.284843,
             5.549353
           ],
           [
-            43.284782,
-            5.548568
+            43.284831,
+            5.549149
           ],
           [
             43.284775,
@@ -11765,64 +11761,68 @@ export const osmLayers: LayerConfig[] = [
             5.548019
           ],
           [
-            43.284627,
-            5.547763
+            43.284639,
+            5.547817
           ],
           [
             43.284579,
             5.547567
           ],
           [
-            43.284495,
-            5.547428
+            43.284533,
+            5.547474
           ],
           [
             43.284462,
             5.547395
           ],
           [
-            43.284418,
-            5.547359
+            43.284446,
+            5.547382
           ],
           [
-            43.284328,
-            5.547339
+            43.284374,
+            5.547344
           ],
           [
             43.284284,
             5.547337
           ],
           [
-            43.284162,
-            5.547382
+            43.284236,
+            5.547344
+          ],
+          [
+            43.284099,
+            5.547447
           ],
           [
             43.283962,
             5.547629
           ],
           [
-            43.283734,
-            5.547975
-          ],
-          [
-            43.28352,
-            5.548453
+            43.283598,
+            5.548241
           ],
           [
             43.283415,
             5.548687
           ],
           [
-            43.283288,
-            5.548847
+            43.283303,
+            5.548837
+          ],
+          [
+            43.283104,
+            5.548975
           ],
           [
             43.283023,
             5.549031
           ],
           [
-            43.282705,
-            5.549214
+            43.282449,
+            5.549381
           ],
           [
             43.282312,
@@ -11833,16 +11833,16 @@ export const osmLayers: LayerConfig[] = [
             5.550078
           ],
           [
-            43.281558,
-            5.55023
+            43.28148,
+            5.550307
           ],
           [
             43.280914,
             5.550863
           ],
           [
-            43.280893,
-            5.550884
+            43.280702,
+            5.551072
           ],
           [
             43.280554,
@@ -11853,8 +11853,8 @@ export const osmLayers: LayerConfig[] = [
             5.551388
           ],
           [
-            43.2802,
-            5.551418
+            43.280094,
+            5.551415
           ],
           [
             43.279986,
@@ -36439,7 +36439,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-817561006",
-        "name": "Transports > Stations (multi-modes) 162",
+        "name": "Transports > Stations (multi-modes) 163",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -36450,7 +36450,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-817598851",
-        "name": "Transports > Stations (multi-modes) 163",
+        "name": "Transports > Stations (multi-modes) 164",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -36494,7 +36494,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-1146429120",
-        "name": "Transports > Stations (multi-modes) 167",
+        "name": "Transports > Stations (multi-modes) 168",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -36505,7 +36505,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-1273169546",
-        "name": "Transports > Stations (multi-modes) 168",
+        "name": "Transports > Stations (multi-modes) 169",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -36604,7 +36604,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-1809092334",
-        "name": "Transports > Stations (multi-modes) 177",
+        "name": "Transports > Stations (multi-modes) 178",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -36615,7 +36615,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-1815260085",
-        "name": "Transports > Stations (multi-modes) 178",
+        "name": "Transports > Stations (multi-modes) 179",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -36637,7 +36637,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-1869645324",
-        "name": "Transports > Stations (multi-modes) 180",
+        "name": "Transports > Stations (multi-modes) 181",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37011,7 +37011,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2185891594",
-        "name": "Transports > Stations (multi-modes) 214",
+        "name": "Transports > Stations (multi-modes) 215",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37033,7 +37033,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2329334228",
-        "name": "Transports > Stations (multi-modes) 216",
+        "name": "Transports > Stations (multi-modes) 217",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37044,7 +37044,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2364712873",
-        "name": "Transports > Stations (multi-modes) 217",
+        "name": "Transports > Stations (multi-modes) 218",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37066,7 +37066,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2503372874",
-        "name": "Transports > Stations (multi-modes) 219",
+        "name": "Transports > Stations (multi-modes) 220",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37077,7 +37077,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2510212525",
-        "name": "Transports > Stations (multi-modes) 220",
+        "name": "Transports > Stations (multi-modes) 221",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37088,7 +37088,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2510486631",
-        "name": "Transports > Stations (multi-modes) 221",
+        "name": "Transports > Stations (multi-modes) 222",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37121,7 +37121,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2793138033",
-        "name": "Transports > Stations (multi-modes) 224",
+        "name": "Transports > Stations (multi-modes) 225",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37132,7 +37132,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2820777641",
-        "name": "Transports > Stations (multi-modes) 225",
+        "name": "Transports > Stations (multi-modes) 226",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37143,7 +37143,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2820777642",
-        "name": "Transports > Stations (multi-modes) 226",
+        "name": "Transports > Stations (multi-modes) 227",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37154,7 +37154,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2820777646",
-        "name": "Transports > Stations (multi-modes) 227",
+        "name": "Transports > Stations (multi-modes) 228",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37165,7 +37165,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-2820777649",
-        "name": "Transports > Stations (multi-modes) 228",
+        "name": "Transports > Stations (multi-modes) 229",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37198,7 +37198,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-3182916879",
-        "name": "Transports > Stations (multi-modes) 231",
+        "name": "Transports > Stations (multi-modes) 232",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37209,7 +37209,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-3186313372",
-        "name": "Transports > Stations (multi-modes) 232",
+        "name": "Transports > Stations (multi-modes) 233",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37220,7 +37220,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-3195223482",
-        "name": "Transports > Stations (multi-modes) 233",
+        "name": "Transports > Stations (multi-modes) 234",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37440,7 +37440,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-3990148723",
-        "name": "Transports > Stations (multi-modes) 253",
+        "name": "Transports > Stations (multi-modes) 254",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37506,7 +37506,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4179430720",
-        "name": "Transports > Stations (multi-modes) 259",
+        "name": "Transports > Stations (multi-modes) 260",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37517,7 +37517,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4179433074",
-        "name": "Transports > Stations (multi-modes) 260",
+        "name": "Transports > Stations (multi-modes) 261",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37649,7 +37649,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4200453714",
-        "name": "Transports > Stations (multi-modes) 272",
+        "name": "Transports > Stations (multi-modes) 273",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37836,7 +37836,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4216167176",
-        "name": "Transports > Stations (multi-modes) 289",
+        "name": "Transports > Stations (multi-modes) 290",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37847,7 +37847,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4216167664",
-        "name": "Transports > Stations (multi-modes) 290",
+        "name": "Transports > Stations (multi-modes) 291",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -37858,7 +37858,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4216172473",
-        "name": "Transports > Stations (multi-modes) 291",
+        "name": "Transports > Stations (multi-modes) 292",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38089,7 +38089,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4266422546",
-        "name": "Transports > Stations (multi-modes) 312",
+        "name": "Transports > Stations (multi-modes) 313",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38309,7 +38309,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-4947595167",
-        "name": "Transports > Stations (multi-modes) 332",
+        "name": "Transports > Stations (multi-modes) 333",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38353,7 +38353,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-6299200591",
-        "name": "Transports > Stations (multi-modes) 336",
+        "name": "Transports > Stations (multi-modes) 337",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38375,7 +38375,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-7393206589",
-        "name": "Transports > Stations (multi-modes) 338",
+        "name": "Transports > Stations (multi-modes) 339",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38408,7 +38408,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9137573450",
-        "name": "Transports > Stations (multi-modes) 341",
+        "name": "Transports > Stations (multi-modes) 342",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38419,7 +38419,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9325089817",
-        "name": "Transports > Stations (multi-modes) 342",
+        "name": "Transports > Stations (multi-modes) 343",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38430,7 +38430,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9387946413",
-        "name": "Transports > Stations (multi-modes) 343",
+        "name": "Transports > Stations (multi-modes) 344",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38441,7 +38441,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9387987218",
-        "name": "Transports > Stations (multi-modes) 344",
+        "name": "Transports > Stations (multi-modes) 345",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38452,7 +38452,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9535899950",
-        "name": "Transports > Stations (multi-modes) 345",
+        "name": "Transports > Stations (multi-modes) 346",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38485,7 +38485,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9656139394",
-        "name": "Transports > Stations (multi-modes) 348",
+        "name": "Transports > Stations (multi-modes) 349",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38496,7 +38496,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9656780841",
-        "name": "Transports > Stations (multi-modes) 349",
+        "name": "Transports > Stations (multi-modes) 350",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38507,7 +38507,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9656780845",
-        "name": "Transports > Stations (multi-modes) 350",
+        "name": "Transports > Stations (multi-modes) 351",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38518,7 +38518,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9656780849",
-        "name": "Transports > Stations (multi-modes) 351",
+        "name": "Transports > Stations (multi-modes) 352",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38551,7 +38551,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-9792973580",
-        "name": "Transports > Stations (multi-modes) 354",
+        "name": "Transports > Stations (multi-modes) 355",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38639,7 +38639,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10097979762",
-        "name": "Transports > Stations (multi-modes) 362",
+        "name": "Transports > Stations (multi-modes) 363",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38683,7 +38683,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10788457796",
-        "name": "Transports > Stations (multi-modes) 366",
+        "name": "Transports > Stations (multi-modes) 367",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38694,7 +38694,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10804879437",
-        "name": "Transports > Stations (multi-modes) 367",
+        "name": "Transports > Stations (multi-modes) 368",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38705,7 +38705,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10804879448",
-        "name": "Transports > Stations (multi-modes) 368",
+        "name": "Transports > Stations (multi-modes) 369",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38738,7 +38738,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10804882310",
-        "name": "Transports > Stations (multi-modes) 371",
+        "name": "Transports > Stations (multi-modes) 372",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38760,7 +38760,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722618",
-        "name": "Transports > Stations (multi-modes) 373",
+        "name": "Transports > Stations (multi-modes) 374",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38771,7 +38771,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722619",
-        "name": "Transports > Stations (multi-modes) 374",
+        "name": "Transports > Stations (multi-modes) 375",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38782,7 +38782,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722621",
-        "name": "Transports > Stations (multi-modes) 375",
+        "name": "Transports > Stations (multi-modes) 376",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38793,7 +38793,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722622",
-        "name": "Transports > Stations (multi-modes) 376",
+        "name": "Transports > Stations (multi-modes) 377",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38804,7 +38804,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722623",
-        "name": "Transports > Stations (multi-modes) 377",
+        "name": "Transports > Stations (multi-modes) 378",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38815,7 +38815,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722795",
-        "name": "Transports > Stations (multi-modes) 378",
+        "name": "Transports > Stations (multi-modes) 379",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38826,7 +38826,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722796",
-        "name": "Transports > Stations (multi-modes) 379",
+        "name": "Transports > Stations (multi-modes) 380",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38837,7 +38837,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722797",
-        "name": "Transports > Stations (multi-modes) 380",
+        "name": "Transports > Stations (multi-modes) 381",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38848,7 +38848,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722798",
-        "name": "Transports > Stations (multi-modes) 381",
+        "name": "Transports > Stations (multi-modes) 382",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38859,7 +38859,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722799",
-        "name": "Transports > Stations (multi-modes) 382",
+        "name": "Transports > Stations (multi-modes) 383",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38870,7 +38870,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10846722800",
-        "name": "Transports > Stations (multi-modes) 383",
+        "name": "Transports > Stations (multi-modes) 384",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38903,7 +38903,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10852830273",
-        "name": "Transports > Stations (multi-modes) 386",
+        "name": "Transports > Stations (multi-modes) 387",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38914,7 +38914,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10852830274",
-        "name": "Transports > Stations (multi-modes) 387",
+        "name": "Transports > Stations (multi-modes) 388",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38925,7 +38925,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10852830285",
-        "name": "Transports > Stations (multi-modes) 388",
+        "name": "Transports > Stations (multi-modes) 389",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38936,7 +38936,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10852830287",
-        "name": "Transports > Stations (multi-modes) 389",
+        "name": "Transports > Stations (multi-modes) 390",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38947,7 +38947,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10860473470",
-        "name": "Transports > Stations (multi-modes) 390",
+        "name": "Transports > Stations (multi-modes) 391",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -38991,7 +38991,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10959889795",
-        "name": "Transports > Stations (multi-modes) 394",
+        "name": "Transports > Stations (multi-modes) 395",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39002,7 +39002,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-10971952150",
-        "name": "Transports > Stations (multi-modes) 395",
+        "name": "Transports > Stations (multi-modes) 396",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39024,7 +39024,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11063027488",
-        "name": "Transports > Stations (multi-modes) 397",
+        "name": "Transports > Stations (multi-modes) 398",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39046,7 +39046,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11194737162",
-        "name": "Transports > Stations (multi-modes) 399",
+        "name": "Transports > Stations (multi-modes) 400",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39068,7 +39068,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11194795907",
-        "name": "Transports > Stations (multi-modes) 401",
+        "name": "Transports > Stations (multi-modes) 402",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39079,7 +39079,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11225690141",
-        "name": "Transports > Stations (multi-modes) 402",
+        "name": "Transports > Stations (multi-modes) 403",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39101,7 +39101,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11415033476",
-        "name": "Transports > Stations (multi-modes) 404",
+        "name": "Transports > Stations (multi-modes) 405",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39112,7 +39112,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11417009679",
-        "name": "Transports > Stations (multi-modes) 405",
+        "name": "Transports > Stations (multi-modes) 406",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39123,7 +39123,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11453981408",
-        "name": "Transports > Stations (multi-modes) 406",
+        "name": "Transports > Stations (multi-modes) 407",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39134,7 +39134,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11458220456",
-        "name": "Transports > Stations (multi-modes) 407",
+        "name": "Transports > Stations (multi-modes) 408",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39145,7 +39145,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11459342139",
-        "name": "Transports > Stations (multi-modes) 408",
+        "name": "Transports > Stations (multi-modes) 409",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39156,7 +39156,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11463696532",
-        "name": "Transports > Stations (multi-modes) 409",
+        "name": "Transports > Stations (multi-modes) 410",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39167,7 +39167,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11466834138",
-        "name": "Transports > Stations (multi-modes) 410",
+        "name": "Transports > Stations (multi-modes) 411",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39178,7 +39178,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11470597627",
-        "name": "Transports > Stations (multi-modes) 411",
+        "name": "Transports > Stations (multi-modes) 412",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39189,7 +39189,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-11473078506",
-        "name": "Transports > Stations (multi-modes) 412",
+        "name": "Transports > Stations (multi-modes) 413",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39233,7 +39233,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-12001643850",
-        "name": "Transports > Stations (multi-modes) 416",
+        "name": "Transports > Stations (multi-modes) 417",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -39244,7 +39244,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "transport_stations-node-12001643858",
-        "name": "Transports > Stations (multi-modes) 417",
+        "name": "Transports > Stations (multi-modes) 418",
         "status": "existant",
         "color": "#0f172a",
         "geometry": "point",
@@ -72530,17 +72530,6 @@ export const osmLayers: LayerConfig[] = [
         ]
       },
       {
-        "id": "parks_points-node-11758662121",
-        "name": "Parcs > Points 26",
-        "status": "existant",
-        "color": "#166534",
-        "geometry": "point",
-        "position": [
-          43.302923,
-          5.402307
-        ]
-      },
-      {
         "id": "parks_points-node-11850614210",
         "name": "Parc de la Garenne",
         "status": "existant",
@@ -72553,7 +72542,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "parks_points-node-12128993536",
-        "name": "Parcs > Points 28",
+        "name": "Parcs > Points 27",
         "status": "existant",
         "color": "#166534",
         "geometry": "point",
@@ -72586,7 +72575,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "parks_points-node-12598878838",
-        "name": "Parcs > Points 31",
+        "name": "Parcs > Points 30",
         "status": "existant",
         "color": "#166534",
         "geometry": "point",
@@ -72597,7 +72586,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "parks_points-node-12921300932",
-        "name": "Parcs > Points 32",
+        "name": "Parcs > Points 31",
         "status": "existant",
         "color": "#166534",
         "geometry": "point",
@@ -78401,7 +78390,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "decoupage_quartiers-relation-6583604",
-        "name": "Notre-Dame du Mont",
+        "name": "Notre-Dame-du-Mont",
         "status": "existant",
         "color": "#be123c",
         "geometry": "polygon",
@@ -78646,7 +78635,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "decoupage_quartiers-relation-6583604-center",
-        "name": "Centre Notre-Dame du Mont",
+        "name": "Centre Notre-Dame-du-Mont",
         "status": "existant",
         "color": "#be123c",
         "geometry": "point",
@@ -80081,7 +80070,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "decoupage_quartiers-relation-6598067",
-        "name": "Le Roucas Blanc",
+        "name": "Le Roucas-Blanc",
         "status": "existant",
         "color": "#be123c",
         "geometry": "polygon",
@@ -80326,7 +80315,7 @@ export const osmLayers: LayerConfig[] = [
       },
       {
         "id": "decoupage_quartiers-relation-6598067-center",
-        "name": "Centre Le Roucas Blanc",
+        "name": "Centre Le Roucas-Blanc",
         "status": "existant",
         "color": "#be123c",
         "geometry": "point",
