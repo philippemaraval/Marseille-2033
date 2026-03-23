@@ -108,6 +108,8 @@ interface MapClickCaptureProps {
   onMapDoubleClick?: () => void
   onMapContextMenu?: () => void
   onMapMouseMove?: (position: LatLngTuple) => void
+  onMapMouseDown?: (position: LatLngTuple) => void
+  onMapMouseUp?: (position: LatLngTuple) => void
 }
 
 interface SupabaseKeyMetadata {
@@ -320,6 +322,8 @@ function MapClickCapture({
   onMapDoubleClick,
   onMapContextMenu,
   onMapMouseMove,
+  onMapMouseDown,
+  onMapMouseUp,
 }: MapClickCaptureProps) {
   useMapEvents({
     click(event) {
@@ -347,6 +351,18 @@ function MapClickCapture({
         return
       }
       onMapMouseMove([event.latlng.lat, event.latlng.lng])
+    },
+    mousedown(event) {
+      if (!enabled || !onMapMouseDown) {
+        return
+      }
+      onMapMouseDown([event.latlng.lat, event.latlng.lng])
+    },
+    mouseup(event) {
+      if (!enabled || !onMapMouseUp) {
+        return
+      }
+      onMapMouseUp([event.latlng.lat, event.latlng.lng])
     },
   })
 
@@ -538,6 +554,7 @@ function App() {
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null)
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
   const [isZoneSelectionMode, setIsZoneSelectionMode] = useState(false)
+  const [isZoneSelectionDragging, setIsZoneSelectionDragging] = useState(false)
   const [zoneSelectionStart, setZoneSelectionStart] = useState<LatLngTuple | null>(
     null,
   )
@@ -908,7 +925,10 @@ function App() {
   }
 
   const focusFeatureById = useCallback(
-    (featureId: string, updateSelection: 'single' | 'preserve' = 'single') => {
+    (
+      featureId: string,
+      updateSelection: 'single' | 'preserve' | 'keep' = 'single',
+    ) => {
       const match = featureById.get(featureId)
       if (!match) {
         return false
@@ -917,6 +937,10 @@ function App() {
       setSelectedFeatureId(featureId)
       if (updateSelection === 'single') {
         setSelectedFeatureIds([featureId])
+      } else if (updateSelection === 'preserve') {
+        setSelectedFeatureIds((current) =>
+          current.includes(featureId) ? current : [...current, featureId],
+        )
       }
       setEditDraft({
         name: match.feature.name,
@@ -936,29 +960,35 @@ function App() {
     [featureById, refreshFeatureVersions],
   )
 
-  const toggleFeatureInSelection = useCallback((featureId: string) => {
-    setSelectedFeatureIds((current) => {
-      if (current.includes(featureId)) {
-        return current.filter((id) => id !== featureId)
-      }
-      return [...current, featureId]
-    })
-  }, [])
-
   const handleFeatureClick = useCallback(
     (featureId: string, event: LeafletMouseEvent) => {
       if (!isAdmin) {
+        return
+      }
+      if (isZoneSelectionMode) {
         return
       }
       event.originalEvent.stopPropagation()
       setFeatureContextMenu(null)
 
       if (event.originalEvent.shiftKey) {
-        toggleFeatureInSelection(featureId)
-        const didFocus = focusFeatureById(featureId, 'preserve')
-        if (didFocus) {
-          setAdminNotice('Selection multiple mise a jour.')
+        const wasSelected = selectedFeatureIdSet.has(featureId)
+        if (wasSelected) {
+          const nextIds = selectedFeatureIds.filter((id) => id !== featureId)
+          setSelectedFeatureIds(nextIds)
+          if (nextIds.length > 0) {
+            void focusFeatureById(nextIds[0], 'keep')
+          } else {
+            setSelectedFeatureId(null)
+            setEditDraft(null)
+            setEditPoints([])
+            setVersionItems([])
+          }
+        } else {
+          setSelectedFeatureIds((current) => [...current, featureId])
+          void focusFeatureById(featureId, 'keep')
         }
+        setAdminNotice('Selection multiple mise a jour.')
       } else {
         focusFeatureById(featureId, 'single')
       }
@@ -968,12 +998,22 @@ function App() {
       }
       setAdminMode('edit')
     },
-    [adminMode, focusFeatureById, isAdmin, toggleFeatureInSelection],
+    [
+      adminMode,
+      focusFeatureById,
+      isAdmin,
+      isZoneSelectionMode,
+      selectedFeatureIdSet,
+      selectedFeatureIds,
+    ],
   )
 
   const handleFeatureContextMenu = useCallback(
     (featureId: string, event: LeafletMouseEvent) => {
       if (!isAdmin) {
+        return
+      }
+      if (isZoneSelectionMode) {
         return
       }
       event.originalEvent.preventDefault()
@@ -986,7 +1026,7 @@ function App() {
         clientY: mouseEvent.clientY,
       })
     },
-    [isAdmin],
+    [isAdmin, isZoneSelectionMode],
   )
 
   const handleMapClick = useCallback(
@@ -995,44 +1035,6 @@ function App() {
         return
       }
       setFeatureContextMenu(null)
-
-      if (isZoneSelectionMode) {
-        if (!zoneSelectionStart) {
-          setZoneSelectionStart(position)
-          setZoneSelectionCurrent(position)
-          setAdminNotice('Selection zone: clique le coin oppose.')
-          return
-        }
-
-        const bounds = normalizeBounds(zoneSelectionStart, position)
-        const ids = visibleLayers
-          .flatMap((layer) =>
-            layer.features
-              .filter((feature) =>
-                statusFilter === 'all' ? true : feature.status === statusFilter,
-              )
-              .filter((feature) => featureIntersectsBounds(feature, bounds))
-              .map((feature) => feature.id),
-          )
-
-        setSelectedFeatureIds(ids)
-        if (ids.length > 0) {
-          focusFeatureById(ids[0], 'preserve')
-        } else {
-          setSelectedFeatureId(null)
-          setEditDraft(null)
-          setEditPoints([])
-        }
-        setIsZoneSelectionMode(false)
-        setZoneSelectionStart(null)
-        setZoneSelectionCurrent(null)
-        setAdminNotice(
-          ids.length > 0
-            ? `${ids.length} element(s) selectionne(s) par zone.`
-            : 'Aucun element dans la zone.',
-        )
-        return
-      }
 
       if (adminMode === 'create') {
         setCreatePoints((current) =>
@@ -1049,28 +1051,84 @@ function App() {
         setAdminNotice(null)
       }
     },
+    [adminMode, createDraft.geometry, editDraft, isAdmin, isRedrawingEditGeometry],
+  )
+
+  const handleMapMouseMove = useCallback(
+    (position: LatLngTuple) => {
+      if (
+        !isAdmin ||
+        !isZoneSelectionMode ||
+        !isZoneSelectionDragging ||
+        !zoneSelectionStart
+      ) {
+        return
+      }
+      setZoneSelectionCurrent(position)
+    },
+    [isAdmin, isZoneSelectionDragging, isZoneSelectionMode, zoneSelectionStart],
+  )
+
+  const handleMapMouseDown = useCallback(
+    (position: LatLngTuple) => {
+      if (!isAdmin || !isZoneSelectionMode) {
+        return
+      }
+      setFeatureContextMenu(null)
+      setZoneSelectionStart(position)
+      setZoneSelectionCurrent(position)
+      setIsZoneSelectionDragging(true)
+      setAdminNotice('Selection zone en cours: relache pour valider.')
+    },
+    [isAdmin, isZoneSelectionMode],
+  )
+
+  const handleMapMouseUp = useCallback(
+    (position: LatLngTuple) => {
+      if (!isAdmin || !isZoneSelectionMode || !isZoneSelectionDragging || !zoneSelectionStart) {
+        return
+      }
+
+      const bounds = normalizeBounds(zoneSelectionStart, position)
+      const ids = visibleLayers
+        .flatMap((layer) =>
+          layer.features
+            .filter((feature) =>
+              statusFilter === 'all' ? true : feature.status === statusFilter,
+            )
+            .filter((feature) => featureIntersectsBounds(feature, bounds))
+            .map((feature) => feature.id),
+        )
+      const uniqueIds = Array.from(new Set(ids))
+
+      setSelectedFeatureIds(uniqueIds)
+      if (uniqueIds.length > 0) {
+        void focusFeatureById(uniqueIds[0], 'keep')
+      } else {
+        setSelectedFeatureId(null)
+        setEditDraft(null)
+        setEditPoints([])
+        setVersionItems([])
+      }
+      setIsZoneSelectionDragging(false)
+      setIsZoneSelectionMode(false)
+      setZoneSelectionStart(null)
+      setZoneSelectionCurrent(null)
+      setAdminNotice(
+        uniqueIds.length > 0
+          ? `${uniqueIds.length} element(s) selectionne(s) par zone.`
+          : 'Aucun element dans la zone.',
+      )
+    },
     [
-      adminMode,
-      createDraft.geometry,
-      editDraft,
       focusFeatureById,
       isAdmin,
-      isRedrawingEditGeometry,
+      isZoneSelectionDragging,
       isZoneSelectionMode,
       statusFilter,
       visibleLayers,
       zoneSelectionStart,
     ],
-  )
-
-  const handleMapMouseMove = useCallback(
-    (position: LatLngTuple) => {
-      if (!isAdmin || !isZoneSelectionMode || !zoneSelectionStart) {
-        return
-      }
-      setZoneSelectionCurrent(position)
-    },
-    [isAdmin, isZoneSelectionMode, zoneSelectionStart],
   )
 
   const handleToolbarToolClick = useCallback(
@@ -1083,6 +1141,7 @@ function App() {
       if (mode === 'create' && geometry) {
         setAdminMode('create')
         setIsZoneSelectionMode(false)
+        setIsZoneSelectionDragging(false)
         setZoneSelectionStart(null)
         setZoneSelectionCurrent(null)
         setFeatureContextMenu(null)
@@ -1161,6 +1220,7 @@ function App() {
     setEditPoints([])
     setIsRedrawingEditGeometry(false)
     setIsZoneSelectionMode(false)
+    setIsZoneSelectionDragging(false)
     setZoneSelectionStart(null)
     setZoneSelectionCurrent(null)
     setFeatureContextMenu(null)
@@ -1422,6 +1482,7 @@ function App() {
     }
     if (isZoneSelectionMode) {
       setIsZoneSelectionMode(false)
+      setIsZoneSelectionDragging(false)
       setZoneSelectionStart(null)
       setZoneSelectionCurrent(null)
       setAdminNotice('Selection zone annulee.')
@@ -1429,9 +1490,10 @@ function App() {
     }
     setFeatureContextMenu(null)
     setIsZoneSelectionMode(true)
+    setIsZoneSelectionDragging(false)
     setZoneSelectionStart(null)
     setZoneSelectionCurrent(null)
-    setAdminNotice('Selection zone active: clique 2 coins sur la carte.')
+    setAdminNotice('Selection zone active: clique-glisse sur la carte.')
   }, [adminMode, isAdmin, isZoneSelectionMode])
 
   const handleClearMultiSelection = useCallback(() => {
@@ -1456,17 +1518,35 @@ function App() {
       }
 
       if (action === 'toggle') {
-        toggleFeatureInSelection(featureId)
-        const didFocus = focusFeatureById(featureId, 'preserve')
-        if (didFocus) {
-          setAdminNotice('Selection multiple mise a jour.')
+        const wasSelected = selectedFeatureIdSet.has(featureId)
+        if (wasSelected) {
+          const nextIds = selectedFeatureIds.filter((id) => id !== featureId)
+          setSelectedFeatureIds(nextIds)
+          if (nextIds.length > 0) {
+            void focusFeatureById(nextIds[0], 'keep')
+          } else {
+            setSelectedFeatureId(null)
+            setEditDraft(null)
+            setEditPoints([])
+            setVersionItems([])
+          }
+        } else {
+          setSelectedFeatureIds((current) => [...current, featureId])
+          void focusFeatureById(featureId, 'keep')
         }
+        setAdminNotice('Selection multiple mise a jour.')
         return
       }
 
       await handleDeleteFeatureByIds([featureId])
     },
-    [featureContextMenu, focusFeatureById, handleDeleteFeatureByIds, toggleFeatureInSelection],
+    [
+      featureContextMenu,
+      focusFeatureById,
+      handleDeleteFeatureByIds,
+      selectedFeatureIdSet,
+      selectedFeatureIds,
+    ],
   )
 
   const handleMapDoubleClick = () => {
@@ -1504,6 +1584,7 @@ function App() {
 
     if (isZoneSelectionMode) {
       setIsZoneSelectionMode(false)
+      setIsZoneSelectionDragging(false)
       setZoneSelectionStart(null)
       setZoneSelectionCurrent(null)
       setAdminNotice('Selection zone annulee.')
@@ -2075,6 +2156,7 @@ function App() {
         if (isZoneSelectionMode) {
           event.preventDefault()
           setIsZoneSelectionMode(false)
+          setIsZoneSelectionDragging(false)
           setZoneSelectionStart(null)
           setZoneSelectionCurrent(null)
           setAdminNotice('Selection zone annulee.')
@@ -3433,7 +3515,9 @@ function App() {
         </section>
       </aside>
 
-      <main className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}`}>
+      <main
+        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isZoneSelectionMode ? ' is-zone-selecting' : ''}`}
+      >
         {isAdmin ? (
           <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
             <p className="map-toolbar-title">Outils carte</p>
@@ -3793,6 +3877,8 @@ function App() {
             onMapDoubleClick={handleMapDoubleClick}
             onMapContextMenu={handleMapContextMenu}
             onMapMouseMove={handleMapMouseMove}
+            onMapMouseDown={handleMapMouseDown}
+            onMapMouseUp={handleMapMouseUp}
           />
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
           {renderDraftGeometry()}

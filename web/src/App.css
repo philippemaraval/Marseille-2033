@@ -646,6 +646,10 @@
   cursor: crosshair;
 }
 
+.map-pane.is-zone-selecting .leaflet-container {
+  cursor: crosshair;
+}
+
 .point-handle-marker,
 .vertex-handle-marker,
 .midpoint-handle-marker {
