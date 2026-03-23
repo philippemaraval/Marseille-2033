@@ -3,10 +3,14 @@ import type { ChangeEvent, FormEvent } from 'react'
 import type {
   LatLngBoundsExpression,
   LatLngTuple,
+  LeafletEvent,
   LeafletMouseEvent,
+  Marker as LeafletMarker,
 } from 'leaflet'
+import { DivIcon } from 'leaflet'
 import {
   CircleMarker,
+  Marker,
   MapContainer,
   Polygon,
   Polyline,
@@ -442,6 +446,12 @@ function isInputLikeElement(target: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
+function markerEventToPosition(event: LeafletEvent): LatLngTuple {
+  const marker = event.target as LeafletMarker
+  const latLng = marker.getLatLng()
+  return [latLng.lat, latLng.lng]
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -489,6 +499,30 @@ function App() {
   const isDrawingOnMap =
     isAdmin &&
     (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
+  const isDirectGeometryEditing =
+    isAdmin && adminMode === 'edit' && !isRedrawingEditGeometry
+
+  const pointHandleIcon = useMemo(
+    () =>
+      new DivIcon({
+        className: 'point-handle-marker',
+        html: '<span></span>',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      }),
+    [],
+  )
+
+  const vertexHandleIcon = useMemo(
+    () =>
+      new DivIcon({
+        className: 'vertex-handle-marker',
+        html: '<span></span>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      }),
+    [],
+  )
 
   const supabaseEnvDiagnostic = useMemo(() => {
     const urlValue = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -1164,6 +1198,32 @@ function App() {
     }
   }
 
+  const handleMoveEditVertex = useCallback((index: number, position: LatLngTuple) => {
+    setEditPoints((current) => {
+      if (index < 0 || index >= current.length) {
+        return current
+      }
+      const next = [...current]
+      next[index] = position
+      return next
+    })
+  }, [])
+
+  const handleEditVertexDrag = useCallback(
+    (index: number, event: LeafletEvent) => {
+      handleMoveEditVertex(index, markerEventToPosition(event))
+    },
+    [handleMoveEditVertex],
+  )
+
+  const handleEditVertexDragEnd = useCallback(
+    (index: number, event: LeafletEvent) => {
+      handleMoveEditVertex(index, markerEventToPosition(event))
+      setAdminNotice('Geometrie ajustee. Clique sur "Enregistrer" pour valider.')
+    },
+    [handleMoveEditVertex],
+  )
+
   const handleToolbarToggleRedraw = useCallback(() => {
     if (!selectedFeature || !editDraft) {
       setAdminNotice('Selectionne un element sur la carte avant de redessiner.')
@@ -1777,6 +1837,46 @@ function App() {
     }
 
     return null
+  }
+
+  const renderDirectEditHandles = () => {
+    if (
+      !isDirectGeometryEditing ||
+      !selectedFeatureId ||
+      !selectedFeature ||
+      !editDraft ||
+      editPoints.length === 0
+    ) {
+      return null
+    }
+
+    if (editDraft.geometry === 'point') {
+      return (
+        <Marker
+          key={`edit-handle-point-${selectedFeatureId}`}
+          position={editPoints[0]}
+          draggable
+          icon={pointHandleIcon}
+          eventHandlers={{
+            drag: (event) => handleEditVertexDrag(0, event),
+            dragend: (event) => handleEditVertexDragEnd(0, event),
+          }}
+        />
+      )
+    }
+
+    return editPoints.map((position, index) => (
+      <Marker
+        key={`edit-handle-${selectedFeatureId}-${index}`}
+        position={position}
+        draggable
+        icon={vertexHandleIcon}
+        eventHandlers={{
+          drag: (event) => handleEditVertexDrag(index, event),
+          dragend: (event) => handleEditVertexDragEnd(index, event),
+        }}
+      />
+    ))
   }
 
   const renderLayerFeatures = (layer: LayerConfig) =>
@@ -2521,6 +2621,11 @@ function App() {
                         <p className="muted">
                           Geometrie: {editDraft.geometry} | points: {editPoints.length}
                         </p>
+                        {!isRedrawingEditGeometry ? (
+                          <p className="muted">
+                            Tu peux deplacer les points directement sur la carte par glisser-deposer.
+                          </p>
+                        ) : null}
 
                         <div className="admin-actions-row">
                           <button
@@ -2969,6 +3074,11 @@ function App() {
                         </>
                       ) : null}
                     </div>
+                    {!isRedrawingEditGeometry ? (
+                      <p className="map-toolbar-meta">
+                        Astuce: glisse directement le point/sommet sur la carte.
+                      </p>
+                    ) : null}
                     {isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">
                         Redessin: {toolbarPointCount} / {toolbarMinPoints} points
@@ -3057,6 +3167,7 @@ function App() {
           />
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
           {renderDraftGeometry()}
+          {renderDirectEditHandles()}
         </MapContainer>
       </main>
     </div>

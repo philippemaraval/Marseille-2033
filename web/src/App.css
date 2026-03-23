@@ -613,6 +613,32 @@
   cursor: crosshair;
 }
 
+.point-handle-marker,
+.vertex-handle-marker {
+  background: transparent;
+  border: 0;
+}
+
+.point-handle-marker span,
+.vertex-handle-marker span {
+  display: block;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.3);
+}
+
+.point-handle-marker span {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #0f172a;
+}
+
+.vertex-handle-marker span {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #0f172a;
+}
+
 .map {
   width: 100%;
   height: 100%;
