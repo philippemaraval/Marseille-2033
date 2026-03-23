@@ -9548,6 +9548,7 @@ function App() {
         <MapContainer
           center={MARSEILLE_CENTER}
           zoom={12}
+          zoomControl={false}
           minZoom={10}
           maxZoom={18}
           maxBounds={METROPOLE_BOUNDS}
