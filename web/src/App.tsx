@@ -70,6 +70,13 @@ interface MapClickCaptureProps {
   onMapClick: (position: LatLngTuple) => void
 }
 
+interface SupabaseKeyMetadata {
+  projectRef: string | null
+  role: string | null
+  expIso: string | null
+  error: string | null
+}
+
 const MARSEILLE_CENTER: LatLngTuple = [43.2965, 5.3698]
 const METROPOLE_BOUNDS: LatLngBoundsExpression = [
   [43.02, 4.95],
@@ -128,6 +135,91 @@ const MIN_POINTS_REQUIRED: Record<DrawGeometry, number> = {
   point: 1,
   line: 2,
   polygon: 3,
+}
+
+function extractProjectRefFromUrl(value: string | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  try {
+    const url = new URL(value)
+    const host = url.hostname.toLowerCase()
+    if (!host.endsWith('.supabase.co')) {
+      return null
+    }
+
+    const [projectRef] = host.split('.')
+    return projectRef || null
+  } catch {
+    return null
+  }
+}
+
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const paddingLength = (4 - (normalized.length % 4)) % 4
+  const padded = normalized + '='.repeat(paddingLength)
+  return atob(padded)
+}
+
+function decodeSupabaseAnonKey(value: string | undefined): SupabaseKeyMetadata {
+  if (!value) {
+    return {
+      projectRef: null,
+      role: null,
+      expIso: null,
+      error: 'Cle absente',
+    }
+  }
+
+  const parts = value.split('.')
+  if (parts.length !== 3) {
+    return {
+      projectRef: null,
+      role: null,
+      expIso: null,
+      error: 'Format JWT invalide',
+    }
+  }
+
+  try {
+    const payloadRaw = decodeBase64Url(parts[1])
+    const payload = JSON.parse(payloadRaw) as {
+      ref?: unknown
+      role?: unknown
+      exp?: unknown
+    }
+
+    const expIso =
+      typeof payload.exp === 'number' && Number.isFinite(payload.exp)
+        ? new Date(payload.exp * 1000).toISOString()
+        : null
+
+    return {
+      projectRef: typeof payload.ref === 'string' ? payload.ref : null,
+      role: typeof payload.role === 'string' ? payload.role : null,
+      expIso,
+      error: null,
+    }
+  } catch {
+    return {
+      projectRef: null,
+      role: null,
+      expIso: null,
+      error: 'Impossible de decoder la cle',
+    }
+  }
+}
+
+function fingerprintToken(value: string | undefined): string {
+  if (!value) {
+    return 'absente'
+  }
+  if (value.length < 20) {
+    return `trop courte (${value.length})`
+  }
+  return `${value.slice(0, 10)}...${value.slice(-6)}`
 }
 
 function MapClickCapture({ enabled, onMapClick }: MapClickCaptureProps) {
@@ -220,6 +312,27 @@ function App() {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [editPoints, setEditPoints] = useState<LatLngTuple[]>([])
   const [isRedrawingEditGeometry, setIsRedrawingEditGeometry] = useState(false)
+
+  const supabaseEnvDiagnostic = useMemo(() => {
+    const urlValue = import.meta.env.VITE_SUPABASE_URL as string | undefined
+    const keyValue = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+    const urlProjectRef = extractProjectRefFromUrl(urlValue)
+    const keyMeta = decodeSupabaseAnonKey(keyValue)
+    const isMatch =
+      urlProjectRef && keyMeta.projectRef
+        ? urlProjectRef === keyMeta.projectRef
+        : null
+
+    return {
+      urlProjectRef,
+      keyProjectRef: keyMeta.projectRef,
+      keyRole: keyMeta.role,
+      keyExpIso: keyMeta.expIso,
+      keyError: keyMeta.error,
+      keyFingerprint: fingerprintToken(keyValue),
+      isMatch,
+    }
+  }, [])
 
   const applyLoadedLayers = useCallback(
     (nextLayers: LayerConfig[], forceActiveLayerId?: string) => {
@@ -962,6 +1075,49 @@ function App() {
         {isAdminPanelOpen ? (
           <section className="panel-block admin-panel">
             <h2>Mode admin</h2>
+            <div className="diagnostic-block">
+              <p className="diagnostic-title">Diagnostic Supabase (build actuel)</p>
+              <ul className="diagnostic-list">
+                <li>
+                  URL project-ref: <code>{supabaseEnvDiagnostic.urlProjectRef ?? 'absent/invalide'}</code>
+                </li>
+                <li>
+                  Cle project-ref:{' '}
+                  <code>{supabaseEnvDiagnostic.keyProjectRef ?? 'introuvable'}</code>
+                </li>
+                <li>
+                  Cle role: <code>{supabaseEnvDiagnostic.keyRole ?? 'inconnu'}</code>
+                </li>
+                <li>
+                  Cle expire le:{' '}
+                  <code>{supabaseEnvDiagnostic.keyExpIso ?? 'inconnu'}</code>
+                </li>
+                <li>
+                  Cle empreinte: <code>{supabaseEnvDiagnostic.keyFingerprint}</code>
+                </li>
+                <li>
+                  URL/Cle:{' '}
+                  <strong
+                    className={
+                      supabaseEnvDiagnostic.isMatch === false
+                        ? 'diag-ko'
+                        : 'diag-ok'
+                    }
+                  >
+                    {supabaseEnvDiagnostic.isMatch === true
+                      ? 'match'
+                      : supabaseEnvDiagnostic.isMatch === false
+                        ? 'mismatch'
+                        : 'indetermine'}
+                  </strong>
+                </li>
+                {supabaseEnvDiagnostic.keyError ? (
+                  <li>
+                    Erreur cle: <code>{supabaseEnvDiagnostic.keyError}</code>
+                  </li>
+                ) : null}
+              </ul>
+            </div>
 
             {!hasSupabase ? (
               <p className="muted">
