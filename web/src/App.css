@@ -68,11 +68,29 @@
   border-top: 1px dashed var(--border);
 }
 
-.layer-group h3 {
+.layer-folder-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
   margin: 0 0 8px;
+  color: #475569;
   font-size: 13px;
-  color: var(--muted);
+  cursor: pointer;
   text-transform: capitalize;
+}
+
+.layer-folder-toggle strong {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.layer-folder-toggle small {
+  color: #64748b;
+  font-size: 11px;
 }
 
 .control-row {
@@ -102,9 +120,14 @@
   margin-top: 8px;
 }
 
+.layer-row.is-locked .control-row span {
+  color: #64748b;
+}
+
 .layer-order-actions {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .radio-grid {
@@ -224,6 +247,90 @@
   margin: 0;
   font-size: 13px;
   color: var(--muted);
+}
+
+.map-search-form {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.map-search-form input,
+.bookmark-tools input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+}
+
+.map-search-form input:focus,
+.bookmark-tools input:focus {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
+}
+
+.map-search-results,
+.bookmark-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.map-search-results li,
+.bookmark-list li {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-search-results strong {
+  font-size: 12px;
+  color: #334155;
+}
+
+.map-search-results p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.bookmark-tools {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.bookmark-tools label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.bookmark-go {
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 12px;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.bookmark-go:hover {
+  color: #1d4ed8;
 }
 
 .ghost-button,

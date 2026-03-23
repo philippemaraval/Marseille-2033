@@ -176,6 +176,22 @@ interface LocalHistoryEntry {
   createdAt: number
 }
 
+interface MapSearchCandidate {
+  id: string
+  label: string
+  subtitle: string
+  position: LatLngTuple
+  source: 'coords' | 'ban' | 'nominatim'
+}
+
+interface ViewBookmark {
+  id: string
+  name: string
+  center: LatLngTuple
+  zoom: number
+  createdAt: number
+}
+
 interface PersistedUiStateV1 {
   version: 1
   updatedAt: string
@@ -208,6 +224,9 @@ interface PersistedUiStateV1 {
   isGridEnabled?: boolean
   localHistoryPast?: LocalHistoryEntry[]
   localHistoryFuture?: LocalHistoryEntry[]
+  lockedLayers?: Record<string, boolean>
+  collapsedLayerFolders?: Record<string, boolean>
+  viewBookmarks?: ViewBookmark[]
   mapView?: {
     center: LatLngTuple
     zoom: number
@@ -307,6 +326,7 @@ const DEFAULT_POINT_RADIUS = 6
 const DEFAULT_LINE_WIDTH = 3
 const DEFAULT_POLYGON_FILL_OPACITY = 0.2
 const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
+const MAX_VIEW_BOOKMARKS = 30
 
 const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
   id: string
@@ -646,6 +666,10 @@ function toLayerId(value: string, layerLabel: string): string {
     .slice(0, 64)
 }
 
+function toLayerLockKey(category: string, layerId: string): string {
+  return `${category}::${layerId}`
+}
+
 function buildDefaultDraft(layerList: LayerConfig[]): CreateDraft {
   const firstLayer = layerList[0]
   return {
@@ -881,6 +905,178 @@ function parseLocalHistoryEntries(value: unknown): LocalHistoryEntry[] {
   }
 
   return entries.slice(-60)
+}
+
+function parseViewBookmarks(value: unknown): ViewBookmark[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const items: ViewBookmark[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) {
+      continue
+    }
+    const center = parseLatLngTuple(item.center)
+    const zoom = parseFiniteNumber(item.zoom)
+    if (!center || zoom === null) {
+      continue
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim().length > 0
+        ? item.id
+        : `bookmark_${crypto.randomUUID()}`
+    const name =
+      typeof item.name === 'string' && item.name.trim().length > 0
+        ? item.name.trim()
+        : `Vue ${items.length + 1}`
+    const createdAt =
+      typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+        ? item.createdAt
+        : Date.now()
+    items.push({
+      id,
+      name,
+      center: clampPointToMetropole(center),
+      zoom: clamp(zoom, 10, 18),
+      createdAt,
+    })
+  }
+  return items.slice(0, MAX_VIEW_BOOKMARKS)
+}
+
+function parseCoordinateQuery(value: string): LatLngTuple | null {
+  const normalized = value
+    .trim()
+    .replace(/[()]/g, '')
+    .replace(/\s+/g, ' ')
+  if (!normalized) {
+    return null
+  }
+
+  const matches = normalized.match(/-?\d+(?:\.\d+)?/g)
+  if (!matches || matches.length < 2) {
+    return null
+  }
+
+  const first = Number.parseFloat(matches[0])
+  const second = Number.parseFloat(matches[1])
+  if (!Number.isFinite(first) || !Number.isFinite(second)) {
+    return null
+  }
+
+  const asLatLng =
+    first >= -90 && first <= 90 && second >= -180 && second <= 180
+      ? ([first, second] as LatLngTuple)
+      : null
+  const asLngLat =
+    second >= -90 && second <= 90 && first >= -180 && first <= 180
+      ? ([second, first] as LatLngTuple)
+      : null
+
+  if (asLatLng && asLngLat) {
+    return clampPointToMetropole(asLatLng)
+  }
+  if (asLatLng) {
+    return clampPointToMetropole(asLatLng)
+  }
+  if (asLngLat) {
+    return clampPointToMetropole(asLngLat)
+  }
+  return null
+}
+
+async function fetchBanCandidates(query: string): Promise<MapSearchCandidate[]> {
+  const params = new URLSearchParams({
+    q: query,
+    limit: '5',
+    autocomplete: '1',
+  })
+  const response = await fetch(`https://api-adresse.data.gouv.fr/search/?${params.toString()}`)
+  if (!response.ok) {
+    return []
+  }
+
+  const data = (await response.json()) as {
+    features?: Array<{
+      geometry?: { coordinates?: [number, number] }
+      properties?: { label?: string; city?: string; context?: string }
+    }>
+  }
+  const features = Array.isArray(data.features) ? data.features : []
+  return features
+    .map<MapSearchCandidate | null>((feature, index) => {
+      const lng = feature.geometry?.coordinates?.[0]
+      const lat = feature.geometry?.coordinates?.[1]
+      if (
+        typeof lat !== 'number' ||
+        !Number.isFinite(lat) ||
+        typeof lng !== 'number' ||
+        !Number.isFinite(lng)
+      ) {
+        return null
+      }
+      const label = feature.properties?.label?.trim()
+      if (!label) {
+        return null
+      }
+      const city = feature.properties?.city?.trim() ?? ''
+      const context = feature.properties?.context?.trim() ?? ''
+      return {
+        id: `ban-${index}-${lat.toFixed(6)}-${lng.toFixed(6)}`,
+        label,
+        subtitle: [city, context].filter(Boolean).join(' | ') || 'BAN',
+        position: clampPointToMetropole([lat, lng]),
+        source: 'ban' as const,
+      }
+    })
+    .filter((item): item is MapSearchCandidate => item !== null)
+}
+
+async function fetchNominatimCandidates(query: string): Promise<MapSearchCandidate[]> {
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    limit: '5',
+    addressdetails: '1',
+    countrycodes: 'fr',
+  })
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+  )
+  if (!response.ok) {
+    return []
+  }
+  const data = (await response.json()) as Array<{
+    place_id?: number
+    display_name?: string
+    lat?: string
+    lon?: string
+    type?: string
+  }>
+  if (!Array.isArray(data)) {
+    return []
+  }
+
+  return data
+    .map<MapSearchCandidate | null>((item, index) => {
+      const lat = Number.parseFloat(item.lat ?? '')
+      const lng = Number.parseFloat(item.lon ?? '')
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null
+      }
+      const displayName = (item.display_name ?? '').trim()
+      if (!displayName) {
+        return null
+      }
+      return {
+        id: `nom-${item.place_id ?? index}`,
+        label: displayName.split(',')[0] || displayName,
+        subtitle: `OSM • ${item.type ?? 'lieu'}`,
+        position: clampPointToMetropole([lat, lng]),
+        source: 'nominatim' as const,
+      }
+    })
+    .filter((item): item is MapSearchCandidate => item !== null)
 }
 
 function hydrateCreateDraftFromPartial(
@@ -1270,6 +1466,17 @@ function App() {
     useState<VisibleFeatureSortMode>('alpha')
   const [isLabelOverlayEnabled, setIsLabelOverlayEnabled] = useState(false)
   const [labelMinZoom, setLabelMinZoom] = useState(14)
+  const [collapsedLayerFolders, setCollapsedLayerFolders] = useState<
+    Record<string, boolean>
+  >({})
+  const [lockedLayers, setLockedLayers] = useState<Record<string, boolean>>({})
+  const [mapSearchQuery, setMapSearchQuery] = useState('')
+  const [mapSearchResults, setMapSearchResults] = useState<MapSearchCandidate[]>([])
+  const [isSearchingMap, setIsSearchingMap] = useState(false)
+  const [mapSearchNotice, setMapSearchNotice] = useState<string | null>(null)
+  const [searchFocusPoint, setSearchFocusPoint] = useState<LatLngTuple | null>(null)
+  const [bookmarkDraftName, setBookmarkDraftName] = useState('')
+  const [viewBookmarks, setViewBookmarks] = useState<ViewBookmark[]>([])
 
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [showDebugInfo, setShowDebugInfo] = useState(false)
@@ -1335,6 +1542,7 @@ function App() {
     center: LatLngTuple
     zoom: number
   } | null>(null)
+  const mapSearchRequestRef = useRef(0)
 
   const isDrawingOnMap =
     isAdmin &&
@@ -1515,6 +1723,19 @@ function App() {
           ...current,
           ...persistedActiveLayers,
         }))
+      }
+      const persistedLockedLayers = parseBooleanRecord(persisted.lockedLayers)
+      if (persistedLockedLayers) {
+        setLockedLayers(persistedLockedLayers)
+      }
+      const persistedCollapsedFolders = parseBooleanRecord(
+        persisted.collapsedLayerFolders,
+      )
+      if (persistedCollapsedFolders) {
+        setCollapsedLayerFolders(persistedCollapsedFolders)
+      }
+      if (persisted.viewBookmarks !== undefined) {
+        setViewBookmarks(parseViewBookmarks(persisted.viewBookmarks))
       }
 
       const persistedStatusFilter = persisted.statusFilter
@@ -1728,6 +1949,9 @@ function App() {
       isGridEnabled,
       localHistoryPast,
       localHistoryFuture,
+      lockedLayers,
+      collapsedLayerFolders,
+      viewBookmarks,
       mapView: mapView ?? null,
     }
 
@@ -1741,6 +1965,7 @@ function App() {
     adminEmail,
     adminMode,
     baseMapId,
+    collapsedLayerFolders,
     categoryFilter,
     createDraft,
     createPoints,
@@ -1757,6 +1982,7 @@ function App() {
     isRedrawingEditGeometry,
     isSnappingEnabled,
     labelMinZoom,
+    lockedLayers,
     localHistoryFuture,
     localHistoryPast,
     mapViewport,
@@ -1767,6 +1993,7 @@ function App() {
     showDebugInfo,
     snapToleranceMeters,
     statusFilter,
+    viewBookmarks,
   ])
 
   const categories = useMemo(
@@ -1900,6 +2127,38 @@ function App() {
     [categories, layers],
   )
 
+  useEffect(() => {
+    setCollapsedLayerFolders((current) => {
+      const next = { ...current }
+      let changed = false
+      for (const category of categories) {
+        if (next[category] === undefined) {
+          next[category] = false
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [categories])
+
+  useEffect(() => {
+    setLockedLayers((current) => {
+      const validKeys = new Set(
+        layers.map((layer) => toLayerLockKey(layer.category, layer.id)),
+      )
+      let changed = false
+      const next: Record<string, boolean> = {}
+      for (const [key, value] of Object.entries(current)) {
+        if (validKeys.has(key)) {
+          next[key] = value
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [layers])
+
   const featureById = useMemo(() => {
     const lookup = new Map<string, FeatureRef>()
     for (const layer of layers) {
@@ -1914,6 +2173,12 @@ function App() {
     }
     return lookup
   }, [layers])
+
+  const isLayerLocked = useCallback(
+    (category: string, layerId: string) =>
+      Boolean(lockedLayers[toLayerLockKey(category, layerId)]),
+    [lockedLayers],
+  )
 
   const selectedFeature = useMemo(
     () => (selectedFeatureId ? featureById.get(selectedFeatureId) ?? null : null),
@@ -2223,6 +2488,45 @@ function App() {
     }))
   }
 
+  const toggleLayerFolder = useCallback((category: string) => {
+    setCollapsedLayerFolders((current) => ({
+      ...current,
+      [category]: !current[category],
+    }))
+  }, [])
+
+  const toggleLayerLock = useCallback(
+    (category: string, layerId: string) => {
+      const key = toLayerLockKey(category, layerId)
+      const nextLocked = !lockedLayers[key]
+      setLockedLayers((current) => ({
+        ...current,
+        [key]: nextLocked,
+      }))
+
+      if (!nextLocked) {
+        setAdminNotice('Calque deverrouille.')
+        return
+      }
+
+      setFeatureContextMenu(null)
+      if (
+        selectedFeature &&
+        selectedFeature.category === category &&
+        selectedFeature.layerId === layerId
+      ) {
+        setEditDraft(null)
+        setEditPoints([])
+        setIsRedrawingEditGeometry(false)
+        if (adminMode !== 'view') {
+          setAdminMode('view')
+        }
+      }
+      setAdminNotice('Calque verrouille: edition/suppression/duplication bloquees.')
+    },
+    [adminMode, lockedLayers, selectedFeature],
+  )
+
   const handleActivateAllLayers = useCallback(() => {
     setActiveLayers(Object.fromEntries(layers.map((layer) => [layer.id, true])))
   }, [layers])
@@ -2240,6 +2544,7 @@ function App() {
       if (!match) {
         return false
       }
+      const layerLocked = isAdmin && isLayerLocked(match.category, match.layerId)
 
       setSelectedFeatureId(featureId)
       if (updateSelection === 'single') {
@@ -2248,6 +2553,14 @@ function App() {
         setSelectedFeatureIds((current) =>
           current.includes(featureId) ? current : [...current, featureId],
         )
+      }
+      if (layerLocked) {
+        setEditDraft(null)
+        setEditPoints([])
+        setIsRedrawingEditGeometry(false)
+        setAdminNotice('Calque verrouille: lecture seule.')
+        void refreshFeatureVersions(featureId)
+        return false
       }
       const styleDraft = resolveDraftStyle(match.feature.geometry, match.feature.style)
       setEditDraft({
@@ -2268,7 +2581,7 @@ function App() {
       void refreshFeatureVersions(featureId)
       return true
     },
-    [featureById, refreshFeatureVersions],
+    [featureById, isAdmin, isLayerLocked, refreshFeatureVersions],
   )
 
   const zoomToPoints = useCallback(
@@ -2329,6 +2642,200 @@ function App() {
     }
   }, [featureById, selectedFeatureId, selectedFeatureIds, zoomToPoints])
 
+  const zoomToPosition = useCallback(
+    (position: LatLngTuple, zoom = 16) => {
+      if (!mapInstance) {
+        return false
+      }
+      mapInstance.flyTo(position, clamp(zoom, 10, 18), { duration: 0.45 })
+      setSearchFocusPoint(position)
+      return true
+    },
+    [mapInstance],
+  )
+
+  const handleMapSearch = useCallback(async () => {
+    const query = mapSearchQuery.trim()
+    if (!query) {
+      setMapSearchResults([])
+      setMapSearchNotice('Saisis une adresse ou des coordonnees.')
+      return
+    }
+
+    const requestId = mapSearchRequestRef.current + 1
+    mapSearchRequestRef.current = requestId
+    setIsSearchingMap(true)
+    setMapSearchNotice(null)
+
+    const directCoordinates = parseCoordinateQuery(query)
+    const directResults: MapSearchCandidate[] = directCoordinates
+      ? [
+          {
+            id: `coord-${directCoordinates[0].toFixed(6)}-${directCoordinates[1].toFixed(6)}`,
+            label: `${directCoordinates[0].toFixed(5)}, ${directCoordinates[1].toFixed(5)}`,
+            subtitle: 'Coordonnees',
+            position: directCoordinates,
+            source: 'coords',
+          },
+        ]
+      : []
+
+    try {
+      const [ban, nominatim] = await Promise.all([
+        fetchBanCandidates(query).catch(() => [] as MapSearchCandidate[]),
+        fetchNominatimCandidates(query).catch(() => [] as MapSearchCandidate[]),
+      ])
+
+      if (mapSearchRequestRef.current !== requestId) {
+        return
+      }
+
+      const merged: MapSearchCandidate[] = []
+      const seen = new Set<string>()
+      for (const item of [...directResults, ...ban, ...nominatim]) {
+        const key = `${item.position[0].toFixed(5)}:${item.position[1].toFixed(5)}`
+        if (seen.has(key)) {
+          continue
+        }
+        seen.add(key)
+        merged.push(item)
+        if (merged.length >= 8) {
+          break
+        }
+      }
+
+      setMapSearchResults(merged)
+      if (merged.length === 0) {
+        setMapSearchNotice('Aucun resultat.')
+        return
+      }
+
+      void zoomToPosition(merged[0].position, 15)
+      setMapSearchNotice(`${merged.length} resultat(s).`)
+    } finally {
+      if (mapSearchRequestRef.current === requestId) {
+        setIsSearchingMap(false)
+      }
+    }
+  }, [mapSearchQuery, zoomToPosition])
+
+  const handleMapSearchSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      void handleMapSearch()
+    },
+    [handleMapSearch],
+  )
+
+  const handleUseCandidateForPointCreation = useCallback(
+    (candidate: MapSearchCandidate) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise pour ajouter un point.')
+        return
+      }
+
+      const targetLayerId = toLayerId(createDraft.layerId, createDraft.layerLabel)
+      const targetCategory = createDraft.category.trim()
+      const layerIsLocked = isLayerLocked(targetCategory, targetLayerId)
+
+      let nextLayer = {
+        category: createDraft.category,
+        layerId: createDraft.layerId,
+        layerLabel: createDraft.layerLabel,
+      }
+      if (layerIsLocked) {
+        const firstUnlocked = layers.find(
+          (layer) => !isLayerLocked(layer.category, layer.id),
+        )
+        if (!firstUnlocked) {
+          setAdminNotice('Tous les calques sont verrouilles.')
+          return
+        }
+        nextLayer = {
+          category: firstUnlocked.category,
+          layerId: firstUnlocked.id,
+          layerLabel: firstUnlocked.label,
+        }
+      }
+
+      setAdminMode('create')
+      setFeatureContextMenu(null)
+      setIsMeasureMode(false)
+      setIsZoneSelectionMode(false)
+      setIsZoneSelectionDragging(false)
+      setZoneSelectionStart(null)
+      setZoneSelectionCurrent(null)
+      setSnapPreview(null)
+      setIsRedrawingEditGeometry(false)
+      setCreateDraft((current) => ({
+        ...current,
+        ...nextLayer,
+        name: candidate.label,
+        geometry: 'point',
+        ...resolveDraftStyle('point', current),
+      }))
+      setCreatePoints([candidate.position])
+      void zoomToPosition(candidate.position, 16)
+      setAdminNotice(
+        `Point prepare depuis "${candidate.label}". Clique "Enregistrer" pour creer l'element.`,
+      )
+    },
+    [createDraft, isAdmin, isLayerLocked, layers, zoomToPosition],
+  )
+
+  const handleAddViewBookmark = useCallback(() => {
+    const viewFromMap =
+      mapInstance !== null
+        ? {
+            center: [mapInstance.getCenter().lat, mapInstance.getCenter().lng] as LatLngTuple,
+            zoom: mapInstance.getZoom(),
+          }
+        : null
+    const sourceView =
+      viewFromMap ??
+      (mapViewport
+        ? {
+            center: mapViewport.center,
+            zoom: mapViewport.zoom,
+          }
+        : null)
+    if (!sourceView) {
+      setMapSearchNotice('Aucune vue carte disponible a enregistrer.')
+      return
+    }
+
+    const trimmedName = bookmarkDraftName.trim()
+    const generatedName = `Vue ${new Date().toLocaleString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`
+    const bookmark: ViewBookmark = {
+      id: `view_${crypto.randomUUID()}`,
+      name: trimmedName || generatedName,
+      center: clampPointToMetropole(sourceView.center),
+      zoom: clamp(sourceView.zoom, 10, 18),
+      createdAt: Date.now(),
+    }
+
+    setViewBookmarks((current) => [bookmark, ...current].slice(0, MAX_VIEW_BOOKMARKS))
+    setBookmarkDraftName('')
+    setMapSearchNotice('Favori de vue ajoute.')
+  }, [bookmarkDraftName, mapInstance, mapViewport])
+
+  const handleGoToViewBookmark = useCallback(
+    (bookmark: ViewBookmark) => {
+      const didZoom = zoomToPosition(bookmark.center, bookmark.zoom)
+      if (!didZoom) {
+        setMapSearchNotice('Carte indisponible pour ce favori.')
+      }
+    },
+    [zoomToPosition],
+  )
+
+  const handleDeleteViewBookmark = useCallback((bookmarkId: string) => {
+    setViewBookmarks((current) => current.filter((bookmark) => bookmark.id !== bookmarkId))
+  }, [])
+
   const handleVisibleFeatureFocus = useCallback(
     (featureId: string) => {
       const match = featureById.get(featureId)
@@ -2359,6 +2866,7 @@ function App() {
       }
       event.originalEvent.stopPropagation()
       setFeatureContextMenu(null)
+      let didFocusEditable = false
 
       if (event.originalEvent.shiftKey) {
         const wasSelected = selectedFeatureIdSet.has(featureId)
@@ -2366,7 +2874,7 @@ function App() {
           const nextIds = selectedFeatureIds.filter((id) => id !== featureId)
           setSelectedFeatureIds(nextIds)
           if (nextIds.length > 0) {
-            void focusFeatureById(nextIds[0], 'keep')
+            didFocusEditable = focusFeatureById(nextIds[0], 'keep')
           } else {
             setSelectedFeatureId(null)
             setEditDraft(null)
@@ -2377,17 +2885,19 @@ function App() {
           setSelectedFeatureIds((current) =>
             current.includes(featureId) ? current : [...current, featureId],
           )
-          void focusFeatureById(featureId, 'keep')
+          didFocusEditable = focusFeatureById(featureId, 'keep')
         }
         setAdminNotice('Selection multiple mise a jour.')
       } else {
-        focusFeatureById(featureId, 'single')
+        didFocusEditable = focusFeatureById(featureId, 'single')
       }
 
       if (adminMode === 'delete' || adminMode === 'edit') {
         return
       }
-      setAdminMode('edit')
+      if (didFocusEditable) {
+        setAdminMode('edit')
+      }
     },
     [
       adminMode,
@@ -2409,6 +2919,11 @@ function App() {
       }
       event.originalEvent.preventDefault()
       event.originalEvent.stopPropagation()
+      const match = featureById.get(featureId)
+      if (match && isLayerLocked(match.category, match.layerId)) {
+        setAdminNotice('Calque verrouille: menu d edition indisponible.')
+        return
+      }
 
       const mouseEvent = event.originalEvent as MouseEvent
       setFeatureContextMenu({
@@ -2417,7 +2932,7 @@ function App() {
         clientY: mouseEvent.clientY,
       })
     },
-    [isAdmin, isZoneSelectionMode],
+    [featureById, isAdmin, isLayerLocked, isZoneSelectionMode],
   )
 
   const handleMapClick = useCallback(
@@ -2446,6 +2961,12 @@ function App() {
       }
 
       if (adminMode === 'create') {
+        const targetLayerId = toLayerId(createDraft.layerId, createDraft.layerLabel)
+        const targetCategory = createDraft.category.trim()
+        if (isLayerLocked(targetCategory, targetLayerId)) {
+          setAdminNotice('Calque verrouille: ajoute ce point dans un autre calque.')
+          return
+        }
         pushLocalHistory('Creation: ajout point')
         setCreatePoints((current) =>
           createDraft.geometry === 'point'
@@ -2480,10 +3001,14 @@ function App() {
     },
     [
       adminMode,
+      createDraft.category,
       createDraft.geometry,
+      createDraft.layerId,
+      createDraft.layerLabel,
       editDraft,
       findSnapResult,
       isAdmin,
+      isLayerLocked,
       isMeasureMode,
       isRedrawingEditGeometry,
       pushLocalHistory,
@@ -2724,6 +3249,10 @@ function App() {
       setAdminNotice('Categorie et calque sont obligatoires.')
       return
     }
+    if (isLayerLocked(category, layerId)) {
+      setAdminNotice('Calque verrouille: impossible de creer un nouvel element.')
+      return
+    }
 
     if (!isHexColor(createDraft.color)) {
       setAdminNotice('Couleur invalide. Utilise le format #RRGGBB.')
@@ -2818,6 +3347,7 @@ function App() {
     createDraft,
     createPoints,
     isAdmin,
+    isLayerLocked,
     layers,
     refreshFeatureVersions,
     syncSupabaseLayers,
@@ -2826,6 +3356,15 @@ function App() {
   const handleSaveEdition = useCallback(async () => {
     if (!supabase || !isAdmin || !selectedFeatureId || !editDraft) {
       setAdminNotice('Selectionne un element a modifier.')
+      return
+    }
+
+    const selectedRef = featureById.get(selectedFeatureId)
+    if (
+      selectedRef &&
+      isLayerLocked(selectedRef.category, selectedRef.layerId)
+    ) {
+      setAdminNotice('Calque verrouille: edition interdite.')
       return
     }
 
@@ -2849,6 +3388,10 @@ function App() {
 
     if (!name || !category || !layerLabel || !layerId) {
       setAdminNotice('Nom, categorie et calque sont obligatoires.')
+      return
+    }
+    if (isLayerLocked(category, layerId)) {
+      setAdminNotice('Calque cible verrouille: deplace vers un calque non verrouille.')
       return
     }
 
@@ -2912,7 +3455,9 @@ function App() {
   }, [
     editDraft,
     editPoints,
+    featureById,
     isAdmin,
+    isLayerLocked,
     layers,
     refreshFeatureVersions,
     selectedFeatureId,
@@ -2929,6 +3474,15 @@ function App() {
       const uniqueIds = Array.from(new Set(ids)).filter((id) => featureById.has(id))
       if (uniqueIds.length === 0) {
         setAdminNotice('Selectionne un element a supprimer.')
+        return
+      }
+
+       const lockedIds = uniqueIds.filter((id) => {
+        const ref = featureById.get(id)
+        return ref ? isLayerLocked(ref.category, ref.layerId) : false
+      })
+      if (lockedIds.length > 0) {
+        setAdminNotice('Suppression refusee: la selection contient un calque verrouille.')
         return
       }
 
@@ -2980,7 +3534,7 @@ function App() {
           : `${deletedCount} element(s) deplaces dans la corbeille.`,
       )
     },
-    [featureById, isAdmin, refreshTrash, syncSupabaseLayers],
+    [featureById, isAdmin, isLayerLocked, refreshTrash, syncSupabaseLayers],
   )
 
   const handleDeleteFeature = useCallback(async () => {
@@ -3020,6 +3574,10 @@ function App() {
       .filter((value): value is FeatureRef => Boolean(value))
     if (refs.length === 0) {
       setAdminNotice('Aucun element duplicable.')
+      return
+    }
+    if (refs.some((ref) => isLayerLocked(ref.category, ref.layerId))) {
+      setAdminNotice('Duplication refusee: la selection contient un calque verrouille.')
       return
     }
 
@@ -3111,6 +3669,7 @@ function App() {
     featureById,
     focusFeatureById,
     isAdmin,
+    isLayerLocked,
     layers,
     selectedFeatureId,
     selectedFeatureIds,
@@ -3477,6 +4036,10 @@ function App() {
       setAdminNotice('Selectionne un element sur la carte avant de redessiner.')
       return
     }
+    if (isLayerLocked(selectedFeature.category, selectedFeature.layerId)) {
+      setAdminNotice('Calque verrouille: redessin indisponible.')
+      return
+    }
 
     if (isRedrawingEditGeometry) {
       setIsRedrawingEditGeometry(false)
@@ -3492,7 +4055,13 @@ function App() {
     setAdminNotice(
       'Redessin actif: clique sur la carte, puis Entrer pour enregistrer.',
     )
-  }, [editDraft, isRedrawingEditGeometry, pushLocalHistory, selectedFeature])
+  }, [
+    editDraft,
+    isLayerLocked,
+    isRedrawingEditGeometry,
+    pushLocalHistory,
+    selectedFeature,
+  ])
 
   const handleToolbarUndoLastPoint = useCallback(() => {
     if (isMeasureMode) {
@@ -3690,6 +4259,115 @@ function App() {
     setIsSaving(false)
     setAdminNotice('Ordre du calque mis a jour.')
   }
+
+  const handleDuplicateLayer = useCallback(
+    async (category: string, layerId: string) => {
+      if (!supabase || !isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+      if (isLayerLocked(category, layerId)) {
+        setAdminNotice('Calque verrouille: duplication indisponible.')
+        return
+      }
+
+      const sourceLayer = layers.find(
+        (layer) => layer.category === category && layer.id === layerId,
+      )
+      if (!sourceLayer) {
+        setAdminNotice('Calque introuvable.')
+        return
+      }
+      if (sourceLayer.features.length === 0) {
+        setAdminNotice('Duplication impossible: calque vide.')
+        return
+      }
+
+      const siblingLayers = layers.filter((layer) => layer.category === category)
+      const baseLabel = `${sourceLayer.label} (copie)`
+      let duplicateLabel = baseLabel
+      let duplicateLayerId = toLayerId('', duplicateLabel) || `${sourceLayer.id}-copie`
+      let suffix = 2
+      while (
+        siblingLayers.some(
+          (layer) =>
+            layer.id === duplicateLayerId ||
+            layer.label.localeCompare(duplicateLabel, 'fr', {
+              sensitivity: 'base',
+            }) === 0,
+        )
+      ) {
+        duplicateLabel = `${baseLabel} ${suffix}`
+        duplicateLayerId =
+          toLayerId('', duplicateLabel) || `${sourceLayer.id}-copie-${suffix}`
+        suffix += 1
+      }
+
+      const layerSortOrder =
+        siblingLayers.reduce(
+          (maxOrder, layer, index) =>
+            Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+          -1,
+        ) + 1
+
+      const rows = sourceLayer.features.map((feature, index) => ({
+        id: `layerdup_${crypto.randomUUID()}`,
+        name: feature.name,
+        status: feature.status,
+        category,
+        layer_id: duplicateLayerId,
+        layer_label: duplicateLabel,
+        layer_sort_order: layerSortOrder,
+        color: feature.color,
+        style: feature.style ?? null,
+        geometry_type: feature.geometry,
+        coordinates: toCoordinates(feature.geometry, getFeaturePoints(feature)),
+        sort_order: index + 1,
+        source: 'manual_layer_duplicate',
+      }))
+
+      setIsSaving(true)
+      setAdminNotice(null)
+      let didFallbackWithoutStyle = false
+      let { error } = await supabase.from('map_features').insert(rows)
+      if (error && isMissingStyleColumnError(error.message)) {
+        const legacyRows = rows.map((row) => ({
+          ...row,
+          style: undefined,
+        }))
+        const retry = await supabase.from('map_features').insert(legacyRows)
+        error = retry.error
+        didFallbackWithoutStyle = !error
+      }
+      if (error) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur duplication calque: ${error.message}`)
+        return
+      }
+
+      await syncSupabaseLayers(duplicateLayerId)
+      setActiveLayers((current) => ({
+        ...current,
+        [duplicateLayerId]: true,
+      }))
+      setCollapsedLayerFolders((current) => ({
+        ...current,
+        [category]: false,
+      }))
+      setIsSaving(false)
+      setAdminNotice(
+        didFallbackWithoutStyle
+          ? `Calque duplique (${rows.length} elements), styles non persistes: applique web/supabase/schema.sql.`
+          : `Calque duplique (${rows.length} elements).`,
+      )
+    },
+    [
+      isAdmin,
+      isLayerLocked,
+      layers,
+      syncSupabaseLayers,
+    ],
+  )
 
   const handleExportGeoJson = () => {
     if (visibleExportEntries.length === 0) {
@@ -4385,8 +5063,9 @@ function App() {
     return [...vertexMarkers, ...midpointMarkers]
   }
 
-  const renderLayerFeatures = (layer: LayerConfig) =>
-    layer.features
+  const renderLayerFeatures = (layer: LayerConfig) => {
+    const layerLocked = isLayerLocked(layer.category, layer.id)
+    return layer.features
       .filter((feature) => isFeatureVisibleByFilters(feature))
       .map((feature) => {
         const styleDraft = resolveDraftStyle(feature.geometry, feature.style)
@@ -4415,6 +5094,11 @@ function App() {
               <p>
                 <strong>Statut:</strong> {STATUS_LABELS[feature.status]}
               </p>
+              {layerLocked ? (
+                <p>
+                  <strong>Calque:</strong> verrouille (lecture seule).
+                </p>
+              ) : null}
               {isAdmin ? (
                 <p>
                   <strong>Admin:</strong> clique l'element pour l'editer.
@@ -4501,6 +5185,7 @@ function App() {
           </Polygon>
         )
       })
+  }
 
   const toolbarPointCount =
     isMeasureMode
@@ -5575,6 +6260,96 @@ function App() {
               ? `${cursorPosition[0].toFixed(5)}, ${cursorPosition[1].toFixed(5)}`
               : 'survole la carte'}
           </p>
+
+          <form className="map-search-form" onSubmit={handleMapSearchSubmit}>
+            <input
+              type="text"
+              value={mapSearchQuery}
+              onChange={(event) => setMapSearchQuery(event.target.value)}
+              placeholder="Adresse ou coordonnees (43.2965, 5.3698)"
+            />
+            <button type="submit" className="ghost-button mini-button" disabled={isSearchingMap}>
+              {isSearchingMap ? '...' : 'Rechercher'}
+            </button>
+          </form>
+          {mapSearchNotice ? <p className="muted">{mapSearchNotice}</p> : null}
+          {mapSearchResults.length > 0 ? (
+            <ul className="map-search-results">
+              {mapSearchResults.map((candidate) => (
+                <li key={candidate.id}>
+                  <div>
+                    <strong>{candidate.label}</strong>
+                    <p>{candidate.subtitle}</p>
+                  </div>
+                  <div className="layer-order-actions">
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={() => {
+                        void zoomToPosition(candidate.position, 16)
+                      }}
+                    >
+                      Zoom
+                    </button>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() => handleUseCandidateForPointCreation(candidate)}
+                      >
+                        Point
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="bookmark-tools">
+            <label>
+              Nom du favori
+              <input
+                type="text"
+                value={bookmarkDraftName}
+                onChange={(event) => setBookmarkDraftName(event.target.value)}
+                placeholder="Ex: Vieux-Port / Centre"
+              />
+            </label>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleAddViewBookmark}
+            >
+              Ajouter favori
+            </button>
+          </div>
+          {viewBookmarks.length === 0 ? (
+            <p className="muted">Aucun favori de vue.</p>
+          ) : (
+            <ul className="bookmark-list">
+              {viewBookmarks.map((bookmark) => (
+                <li key={bookmark.id}>
+                  <button
+                    type="button"
+                    className="bookmark-go"
+                    onClick={() => handleGoToViewBookmark(bookmark)}
+                    title="Aller a ce favori"
+                  >
+                    {bookmark.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button mini-button"
+                    onClick={() => handleDeleteViewBookmark(bookmark.id)}
+                    title="Supprimer ce favori"
+                  >
+                    Suppr.
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="panel-block">
@@ -5597,43 +6372,90 @@ function App() {
           </div>
           {layersByCategory.map((block) => (
             <div key={block.category} className="layer-group">
-              <h3>{block.category}</h3>
-              {block.layers.map((layer, index) => (
-                <div key={layer.id} className="layer-row">
-                  <label className="control-row">
-                    <input
-                      type="checkbox"
-                      checked={activeLayers[layer.id]}
-                      onChange={() => toggleLayer(layer.id)}
-                    />
-                    <span>{layer.label}</span>
-                  </label>
-                  {isAdmin ? (
-                    <div className="layer-order-actions">
-                      <button
-                        type="button"
-                        className="ghost-button mini-button"
-                        onClick={() => void handleMoveLayer(block.category, layer.id, 'up')}
-                        disabled={isSaving || index === 0}
-                        title="Monter"
+              <button
+                type="button"
+                className="layer-folder-toggle"
+                onClick={() => toggleLayerFolder(block.category)}
+                aria-expanded={!collapsedLayerFolders[block.category]}
+              >
+                <span>{collapsedLayerFolders[block.category] ? '▸' : '▾'}</span>
+                <strong>{block.category}</strong>
+                <small>
+                  {block.layers.filter((layer) => activeLayers[layer.id]).length}/
+                  {block.layers.length}
+                </small>
+              </button>
+              {collapsedLayerFolders[block.category]
+                ? null
+                : block.layers.map((layer, index) => {
+                    const layerLocked = isLayerLocked(block.category, layer.id)
+                    return (
+                      <div
+                        key={layer.id}
+                        className={`layer-row${layerLocked ? ' is-locked' : ''}`}
                       >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button mini-button"
-                        onClick={() =>
-                          void handleMoveLayer(block.category, layer.id, 'down')
-                        }
-                        disabled={isSaving || index === block.layers.length - 1}
-                        title="Descendre"
-                      >
-                        ↓
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+                        <label className="control-row">
+                          <input
+                            type="checkbox"
+                            checked={activeLayers[layer.id]}
+                            onChange={() => toggleLayer(layer.id)}
+                          />
+                          <span>
+                            {layer.label}
+                            {layerLocked ? ' (verrouille)' : ''}
+                          </span>
+                        </label>
+                        {isAdmin ? (
+                          <div className="layer-order-actions">
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() =>
+                                toggleLayerLock(block.category, layer.id)
+                              }
+                              disabled={isSaving}
+                              title={layerLocked ? 'Deverrouiller' : 'Verrouiller'}
+                            >
+                              {layerLocked ? 'Deverr.' : 'Verrou.'}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() =>
+                                void handleDuplicateLayer(block.category, layer.id)
+                              }
+                              disabled={isSaving || layerLocked}
+                              title="Dupliquer le calque"
+                            >
+                              Dupl.
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() =>
+                                void handleMoveLayer(block.category, layer.id, 'up')
+                              }
+                              disabled={isSaving || index === 0}
+                              title="Monter"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() =>
+                                void handleMoveLayer(block.category, layer.id, 'down')
+                              }
+                              disabled={isSaving || index === block.layers.length - 1}
+                              title="Descendre"
+                            >
+                              ↓
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
             </div>
           ))}
         </section>
@@ -6407,6 +7229,20 @@ function App() {
             </CircleMarker>
           ))}
           {renderDraftGeometry()}
+          {searchFocusPoint ? (
+            <CircleMarker
+              center={searchFocusPoint}
+              radius={8}
+              interactive={false}
+              pathOptions={{
+                color: '#0f172a',
+                fillColor: '#38bdf8',
+                fillOpacity: 0.38,
+                weight: 2,
+                dashArray: '5 4',
+              }}
+            />
+          ) : null}
           {isAdmin && isMeasureMode && measurePoints.length > 0 ? (
             measureGeometry === 'polygon' ? (
               measurePoints.length >= 3 ? (
