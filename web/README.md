@@ -63,6 +63,9 @@ Fonctionnement:
 - `Suppression`: envoi dans la corbeille (soft delete), restauration possible.
 - `Versioning`: historique des versions par element + restauration de la version precedente.
 - `Ordre manuel`: fleches haut/bas sur les calques (ordre par categorie, persiste en base).
+- `Exports`: GeoJSON / KML des elements visibles.
+- `Imports`: GeoJSON / KML depuis l'admin vers un calque cible.
+- `Debug`: bloc diagnostic Supabase repliable dans le panneau admin.
 
 Toutes les modifications sont ecrites dans `map_features` puis rechargees immediatement.
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import type {
   LatLngBoundsExpression,
   LatLngTuple,
@@ -16,14 +16,23 @@ import {
 } from 'react-leaflet'
 import {
   type FeatureVersion,
+  type ImportFeatureInsert,
   type TrashFeature,
   fetchFeatureVersions,
   fetchTrashFromSupabase,
+  importFeaturesToSupabase,
   moveFeatureToTrash,
   persistLayerSortOrder,
   restoreFeatureFromTrash,
   restorePreviousFeatureVersion,
 } from './data/adminSupabase'
+import {
+  buildGeoJsonExport,
+  buildKmlExport,
+  parseImportedFeatures,
+  type FeatureEnvelope,
+  type ImportedGeometryFeature,
+} from './data/importExport'
 import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
 import { layerMeta, layers as fallbackLayers } from './data/layers'
 import { hasSupabase, supabase } from './lib/supabase'
@@ -73,6 +82,14 @@ interface EditDraft {
   layerId: string
   layerLabel: string
   geometry: DrawGeometry
+}
+
+interface ImportDraft {
+  category: string
+  layerId: string
+  layerLabel: string
+  defaultStatus: StatusId
+  defaultColor: string
 }
 
 interface MapClickCaptureProps {
@@ -298,11 +315,61 @@ function buildDefaultDraft(layerList: LayerConfig[]): CreateDraft {
   }
 }
 
+function buildDefaultImportDraft(layerList: LayerConfig[]): ImportDraft {
+  const firstLayer = layerList[0]
+  return {
+    category: firstLayer?.category ?? 'transports en commun',
+    layerId: firstLayer?.id ?? 'import-calque',
+    layerLabel: firstLayer?.label ?? 'Import manuel',
+    defaultStatus: 'propose',
+    defaultColor: STATUS_COLORS.propose,
+  }
+}
+
 function getLayerSortOrderValue(layer: LayerConfig, fallback = 0): number {
   if (typeof layer.sortOrder === 'number' && Number.isFinite(layer.sortOrder)) {
     return layer.sortOrder
   }
   return fallback
+}
+
+function toCoordinatesFromImported(
+  item: ImportedGeometryFeature,
+): unknown | null {
+  if (item.geometry === 'point') {
+    return item.position ?? null
+  }
+
+  if (item.geometry === 'line') {
+    return item.positions && item.positions.length >= 2 ? item.positions : null
+  }
+
+  return item.positions && item.positions.length >= 3 ? item.positions : null
+}
+
+function sanitizeFileBasename(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function downloadTextFile(
+  filename: string,
+  content: string,
+  mimeType: string,
+): void {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }
 
 function App() {
@@ -319,6 +386,7 @@ function App() {
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
 
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
+  const [showDebugInfo, setShowDebugInfo] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabase)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -337,6 +405,12 @@ function App() {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [editPoints, setEditPoints] = useState<LatLngTuple[]>([])
   const [isRedrawingEditGeometry, setIsRedrawingEditGeometry] = useState(false)
+  const [importDraft, setImportDraft] = useState<ImportDraft>(() =>
+    buildDefaultImportDraft(fallbackLayers),
+  )
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
+  const [importPreviewCount, setImportPreviewCount] = useState<number | null>(null)
   const [trashItems, setTrashItems] = useState<TrashFeature[]>([])
   const [isTrashLoading, setIsTrashLoading] = useState(false)
   const [versionItems, setVersionItems] = useState<FeatureVersion[]>([])
@@ -493,6 +567,23 @@ function App() {
             })),
         )
         .sort((a, b) => a.name.localeCompare(b.name, 'fr')),
+    [statusFilter, visibleLayers],
+  )
+
+  const visibleExportEntries = useMemo<FeatureEnvelope[]>(
+    () =>
+      visibleLayers.flatMap((layer) =>
+        layer.features
+          .filter((feature) =>
+            statusFilter === 'all' ? true : feature.status === statusFilter,
+          )
+          .map((feature) => ({
+            feature,
+            category: layer.category,
+            layerId: layer.id,
+            layerLabel: layer.label,
+          })),
+      ),
     [statusFilter, visibleLayers],
   )
 
@@ -1024,6 +1115,172 @@ function App() {
     setAdminNotice('Ordre du calque mis a jour.')
   }
 
+  const handleExportGeoJson = () => {
+    if (visibleExportEntries.length === 0) {
+      setAdminNotice('Aucun element visible a exporter.')
+      return
+    }
+
+    const payload = buildGeoJsonExport(visibleExportEntries)
+    const day = new Date().toISOString().slice(0, 10)
+    downloadTextFile(
+      `marseille2033-export-${day}.geojson`,
+      JSON.stringify(payload, null, 2),
+      'application/geo+json;charset=utf-8',
+    )
+    setAdminNotice(`Export GeoJSON cree (${visibleExportEntries.length} elements).`)
+  }
+
+  const handleExportKml = () => {
+    if (visibleExportEntries.length === 0) {
+      setAdminNotice('Aucun element visible a exporter.')
+      return
+    }
+
+    const payload = buildKmlExport(visibleExportEntries)
+    const day = new Date().toISOString().slice(0, 10)
+    downloadTextFile(
+      `marseille2033-export-${day}.kml`,
+      payload,
+      'application/vnd.google-earth.kml+xml;charset=utf-8',
+    )
+    setAdminNotice(`Export KML cree (${visibleExportEntries.length} elements).`)
+  }
+
+  const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+    setImportFile(file)
+    setImportPreviewCount(null)
+    if (!file) {
+      return
+    }
+
+    try {
+      const text = await file.text()
+      const imported = parseImportedFeatures(text, file.name)
+      setImportPreviewCount(imported.length)
+      if (imported.length === 0) {
+        setAdminNotice('Fichier charge mais aucun element exploitable trouve.')
+      } else {
+        setAdminNotice(
+          `Fichier charge: ${imported.length} element(s) detecte(s).`,
+        )
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Lecture du fichier impossible.'
+      setAdminNotice(`Erreur import: ${message}`)
+    }
+  }
+
+  const handleImportFeatures = async () => {
+    if (!isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+    if (!importFile) {
+      setAdminNotice('Selectionne un fichier GeoJSON/KML a importer.')
+      return
+    }
+
+    const layerLabel = importDraft.layerLabel.trim()
+    const category = importDraft.category.trim()
+    const layerId = toLayerId(importDraft.layerId, layerLabel)
+    if (!layerLabel || !category || !layerId) {
+      setAdminNotice('Categorie, identifiant calque et nom calque sont requis.')
+      return
+    }
+
+    if (!isHexColor(importDraft.defaultColor)) {
+      setAdminNotice('Couleur par defaut invalide (#RRGGBB).')
+      return
+    }
+
+    setIsImporting(true)
+    setAdminNotice(null)
+
+    try {
+      const fileText = await importFile.text()
+      const parsed = parseImportedFeatures(fileText, importFile.name)
+      if (parsed.length === 0) {
+        setIsImporting(false)
+        setAdminNotice('Aucun element importable detecte dans ce fichier.')
+        return
+      }
+
+      const basename = sanitizeFileBasename(importFile.name) || 'import'
+      const existingLayer = layers.find(
+        (layer) => layer.id === layerId && layer.category === category,
+      )
+      const layerSortOrder =
+        existingLayer !== undefined
+          ? getLayerSortOrderValue(existingLayer)
+          : layers
+              .filter((layer) => layer.category === category)
+              .reduce(
+                (maxOrder, layer, index) =>
+                  Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+                -1,
+              ) + 1
+
+      const existingFeatureCount =
+        layers.find((layer) => layer.id === layerId)?.features.length ?? 0
+
+      const rows: ImportFeatureInsert[] = []
+      for (let index = 0; index < parsed.length; index += 1) {
+        const item = parsed[index]
+        const coordinates = toCoordinatesFromImported(item)
+        if (!coordinates) {
+          continue
+        }
+        rows.push({
+          id: `import_${basename}_${Date.now()}_${index}_${crypto.randomUUID().slice(0, 8)}`,
+          name: item.name || `Import ${index + 1}`,
+          status: item.status ?? importDraft.defaultStatus,
+          category,
+          layerId,
+          layerLabel,
+          layerSortOrder,
+          color: item.color ?? importDraft.defaultColor,
+          geometryType: item.geometry,
+          coordinates,
+          sortOrder: existingFeatureCount + index + 1,
+          source: 'manual_import',
+        })
+      }
+
+      if (rows.length === 0) {
+        setIsImporting(false)
+        setAdminNotice('Aucun element valide apres normalisation.')
+        return
+      }
+
+      const result = await importFeaturesToSupabase(rows)
+      if (!result.ok) {
+        setIsImporting(false)
+        setAdminNotice(`Erreur import: ${result.error}`)
+        return
+      }
+
+      setImportFile(null)
+      setImportPreviewCount(null)
+      await syncSupabaseLayers(layerId)
+      setActiveLayers((current) => ({
+        ...current,
+        [layerId]: true,
+      }))
+      setIsImporting(false)
+      setAdminNotice(
+        `Import termine: ${result.data.inserted} element(s) ajoutes.`,
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Import impossible.'
+      setIsImporting(false)
+      setAdminNotice(`Erreur import: ${message}`)
+    }
+  }
+
   const setCreateLayerTemplate = (layerId: string) => {
     const match = layerSuggestions.find((layer) => layer.id === layerId)
     if (!match) {
@@ -1054,6 +1311,20 @@ function App() {
       layerId: match.id,
       layerLabel: match.label,
     })
+  }
+
+  const setImportLayerTemplate = (layerId: string) => {
+    const match = layerSuggestions.find((layer) => layer.id === layerId)
+    if (!match) {
+      return
+    }
+
+    setImportDraft((current) => ({
+      ...current,
+      category: match.category,
+      layerId: match.id,
+      layerLabel: match.label,
+    }))
   }
 
   const renderDraftGeometry = () => {
@@ -1298,50 +1569,66 @@ function App() {
 
         {isAdminPanelOpen ? (
           <section className="panel-block admin-panel">
-            <h2>Mode admin</h2>
-            <div className="diagnostic-block">
-              <p className="diagnostic-title">Diagnostic Supabase (build actuel)</p>
-              <ul className="diagnostic-list">
-                <li>
-                  URL project-ref: <code>{supabaseEnvDiagnostic.urlProjectRef ?? 'absent/invalide'}</code>
-                </li>
-                <li>
-                  Cle project-ref:{' '}
-                  <code>{supabaseEnvDiagnostic.keyProjectRef ?? 'introuvable'}</code>
-                </li>
-                <li>
-                  Cle role: <code>{supabaseEnvDiagnostic.keyRole ?? 'inconnu'}</code>
-                </li>
-                <li>
-                  Cle expire le:{' '}
-                  <code>{supabaseEnvDiagnostic.keyExpIso ?? 'inconnu'}</code>
-                </li>
-                <li>
-                  Cle empreinte: <code>{supabaseEnvDiagnostic.keyFingerprint}</code>
-                </li>
-                <li>
-                  URL/Cle:{' '}
-                  <strong
-                    className={
-                      supabaseEnvDiagnostic.isMatch === false
-                        ? 'diag-ko'
-                        : 'diag-ok'
-                    }
-                  >
-                    {supabaseEnvDiagnostic.isMatch === true
-                      ? 'match'
-                      : supabaseEnvDiagnostic.isMatch === false
-                        ? 'mismatch'
-                        : 'indetermine'}
-                  </strong>
-                </li>
-                {supabaseEnvDiagnostic.keyError ? (
-                  <li>
-                    Erreur cle: <code>{supabaseEnvDiagnostic.keyError}</code>
-                  </li>
-                ) : null}
-              </ul>
+            <div className="admin-title-row">
+              <h2>Mode admin</h2>
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={() => setShowDebugInfo((current) => !current)}
+              >
+                {showDebugInfo ? 'Masquer Debug' : 'Debug'}
+              </button>
             </div>
+            {showDebugInfo ? (
+              <div className="diagnostic-block">
+                <p className="diagnostic-title">
+                  Diagnostic Supabase (build actuel)
+                </p>
+                <ul className="diagnostic-list">
+                  <li>
+                    URL project-ref:{' '}
+                    <code>
+                      {supabaseEnvDiagnostic.urlProjectRef ?? 'absent/invalide'}
+                    </code>
+                  </li>
+                  <li>
+                    Cle project-ref:{' '}
+                    <code>{supabaseEnvDiagnostic.keyProjectRef ?? 'introuvable'}</code>
+                  </li>
+                  <li>
+                    Cle role: <code>{supabaseEnvDiagnostic.keyRole ?? 'inconnu'}</code>
+                  </li>
+                  <li>
+                    Cle expire le:{' '}
+                    <code>{supabaseEnvDiagnostic.keyExpIso ?? 'inconnu'}</code>
+                  </li>
+                  <li>
+                    Cle empreinte: <code>{supabaseEnvDiagnostic.keyFingerprint}</code>
+                  </li>
+                  <li>
+                    URL/Cle:{' '}
+                    <strong
+                      className={
+                        supabaseEnvDiagnostic.isMatch === false
+                          ? 'diag-ko'
+                          : 'diag-ok'
+                      }
+                    >
+                      {supabaseEnvDiagnostic.isMatch === true
+                        ? 'match'
+                        : supabaseEnvDiagnostic.isMatch === false
+                          ? 'mismatch'
+                          : 'indetermine'}
+                    </strong>
+                  </li>
+                  {supabaseEnvDiagnostic.keyError ? (
+                    <li>
+                      Erreur cle: <code>{supabaseEnvDiagnostic.keyError}</code>
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
+            ) : null}
 
             {!hasSupabase ? (
               <p className="muted">
@@ -1414,6 +1701,160 @@ function App() {
                     onClick={handleAdminLogout}
                   >
                     Deconnexion
+                  </button>
+                </div>
+
+                <div className="editor-block">
+                  <h3>Exports</h3>
+                  <p className="muted">
+                    Exporte les elements visibles ({visibleExportEntries.length}).
+                  </p>
+                  <div className="admin-actions-row">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={handleExportGeoJson}
+                      disabled={visibleExportEntries.length === 0}
+                    >
+                      Export GeoJSON
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={handleExportKml}
+                      disabled={visibleExportEntries.length === 0}
+                    >
+                      Export KML
+                    </button>
+                  </div>
+                </div>
+
+                <div className="editor-block">
+                  <h3>Import GeoJSON / KML</h3>
+
+                  <label>
+                    Fichier
+                    <input
+                      type="file"
+                      accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml"
+                      onChange={(event) => void handleImportFileChange(event)}
+                    />
+                  </label>
+
+                  {importFile ? (
+                    <p className="muted">
+                      Fichier: <strong>{importFile.name}</strong>{' '}
+                      {typeof importPreviewCount === 'number'
+                        ? `| ${importPreviewCount} element(s) detecte(s)`
+                        : ''}
+                    </p>
+                  ) : (
+                    <p className="muted">Selectionne un fichier a importer.</p>
+                  )}
+
+                  <label>
+                    Utiliser un calque existant
+                    <select
+                      value=""
+                      onChange={(event) => {
+                        if (event.target.value) {
+                          setImportLayerTemplate(event.target.value)
+                        }
+                      }}
+                    >
+                      <option value="">Choisir...</option>
+                      {layerSuggestions.map((layer) => (
+                        <option key={layer.id} value={layer.id}>
+                          {layer.label} ({layer.category})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="grid-2">
+                    <label>
+                      Categorie cible
+                      <input
+                        type="text"
+                        value={importDraft.category}
+                        onChange={(event) =>
+                          setImportDraft((current) => ({
+                            ...current,
+                            category: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      Nom du calque
+                      <input
+                        type="text"
+                        value={importDraft.layerLabel}
+                        onChange={(event) =>
+                          setImportDraft((current) => ({
+                            ...current,
+                            layerLabel: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid-2">
+                    <label>
+                      Identifiant du calque
+                      <input
+                        type="text"
+                        value={importDraft.layerId}
+                        onChange={(event) =>
+                          setImportDraft((current) => ({
+                            ...current,
+                            layerId: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      Statut par defaut
+                      <select
+                        value={importDraft.defaultStatus}
+                        onChange={(event) =>
+                          setImportDraft((current) => ({
+                            ...current,
+                            defaultStatus: event.target.value as StatusId,
+                          }))
+                        }
+                      >
+                        <option value="existant">Existant</option>
+                        <option value="en cours">En cours</option>
+                        <option value="propose">Propose</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label>
+                    Couleur par defaut
+                    <input
+                      type="color"
+                      value={importDraft.defaultColor}
+                      onChange={(event) =>
+                        setImportDraft((current) => ({
+                          ...current,
+                          defaultColor: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    className="solid-button"
+                    onClick={() => void handleImportFeatures()}
+                    disabled={isImporting || !importFile}
+                  >
+                    {isImporting ? 'Import en cours...' : 'Importer dans la base'}
                   </button>
                 </div>
 

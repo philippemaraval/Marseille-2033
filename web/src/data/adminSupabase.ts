@@ -59,6 +59,21 @@ interface PersistLayerOrderInput {
   sortOrder: number
 }
 
+export interface ImportFeatureInsert {
+  id: string
+  name: string
+  status: StatusId
+  category: string
+  layerId: string
+  layerLabel: string
+  layerSortOrder: number
+  color: string
+  geometryType: 'point' | 'line' | 'polygon'
+  coordinates: unknown
+  sortOrder: number
+  source?: string
+}
+
 function normalizeAdminError(message: string): string {
   const normalized = message.toLowerCase()
 
@@ -71,6 +86,14 @@ function normalizeAdminError(message: string): string {
   }
 
   return message
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
 }
 
 function isStatus(value: unknown): value is StatusId {
@@ -312,4 +335,44 @@ export async function persistLayerSortOrder(
   }
 
   return { ok: true, data: null }
+}
+
+export async function importFeaturesToSupabase(
+  payload: ImportFeatureInsert[],
+): Promise<Result<{ inserted: number }>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  if (payload.length === 0) {
+    return { ok: true, data: { inserted: 0 } }
+  }
+
+  const chunks = chunkArray(payload, 200)
+  let inserted = 0
+
+  for (const chunk of chunks) {
+    const rows = chunk.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      status: entry.status,
+      category: entry.category,
+      layer_id: entry.layerId,
+      layer_label: entry.layerLabel,
+      layer_sort_order: entry.layerSortOrder,
+      color: entry.color,
+      geometry_type: entry.geometryType,
+      coordinates: entry.coordinates,
+      sort_order: entry.sortOrder,
+      source: entry.source ?? 'manual_import',
+    }))
+
+    const { error } = await supabase.from('map_features').insert(rows)
+    if (error) {
+      return { ok: false, error: normalizeAdminError(error.message) }
+    }
+    inserted += rows.length
+  }
+
+  return { ok: true, data: { inserted } }
 }

@@ -147,6 +147,11 @@
   outline-offset: 1px;
 }
 
+.admin-panel input[type='file'] {
+  min-height: 40px;
+  padding: 6px;
+}
+
 .legend-list,
 .feature-list {
   list-style: none;
@@ -260,6 +265,18 @@
 
 .admin-panel {
   border-color: #cbd5e1;
+}
+
+.admin-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.admin-title-row h2 {
+  margin: 0;
 }
 
 .diagnostic-block {
