@@ -546,6 +546,10 @@
   padding: 2px;
 }
 
+.map-toolbar-range {
+  width: 100%;
+}
+
 .map-toolbar-meta {
   margin: 0;
   font-size: 12px;
@@ -556,6 +560,28 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.map-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.map-history-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #334155;
+}
+
+.map-history-list time {
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
 }
 
 .map-toolbar .ghost-button.active {
@@ -647,6 +673,10 @@
 }
 
 .map-pane.is-zone-selecting .leaflet-container {
+  cursor: crosshair;
+}
+
+.map-pane.is-measuring .leaflet-container {
   cursor: crosshair;
 }
 

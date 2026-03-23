@@ -112,6 +112,13 @@ interface MapClickCaptureProps {
   onMapMouseUp?: (position: LatLngTuple) => void
 }
 
+interface MapViewportCaptureProps {
+  onViewportChange: (viewport: {
+    zoom: number
+    bounds: [LatLngTuple, LatLngTuple]
+  }) => void
+}
+
 interface SupabaseKeyMetadata {
   projectRef: string | null
   role: string | null
@@ -123,6 +130,31 @@ interface FeatureContextMenuState {
   featureId: string
   clientX: number
   clientY: number
+}
+
+type MeasureGeometry = 'line' | 'polygon'
+
+interface SnapSegment {
+  start: LatLngTuple
+  end: LatLngTuple
+}
+
+interface SnapPreviewState {
+  position: LatLngTuple
+  type: 'vertex' | 'segment'
+  distanceMeters: number
+}
+
+interface LocalHistorySnapshot {
+  createPoints: LatLngTuple[]
+  editPoints: LatLngTuple[]
+  measurePoints: LatLngTuple[]
+}
+
+interface LocalHistoryEntry {
+  label: string
+  snapshot: LocalHistorySnapshot
+  createdAt: number
 }
 
 const MARSEILLE_CENTER: LatLngTuple = [43.2965, 5.3698]
@@ -197,6 +229,11 @@ const DRAW_GEOMETRY_LABELS: Record<DrawGeometry, string> = {
   point: 'point',
   line: 'ligne',
   polygon: 'polygone',
+}
+
+const MEASURE_GEOMETRY_LABELS: Record<MeasureGeometry, string> = {
+  line: 'Distance',
+  polygon: 'Surface',
 }
 
 const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
@@ -369,6 +406,44 @@ function MapClickCapture({
   return null
 }
 
+function MapViewportCapture({ onViewportChange }: MapViewportCaptureProps) {
+  const map = useMapEvents({
+    moveend() {
+      const bounds = map.getBounds()
+      onViewportChange({
+        zoom: map.getZoom(),
+        bounds: [
+          [bounds.getSouth(), bounds.getWest()],
+          [bounds.getNorth(), bounds.getEast()],
+        ],
+      })
+    },
+    zoomend() {
+      const bounds = map.getBounds()
+      onViewportChange({
+        zoom: map.getZoom(),
+        bounds: [
+          [bounds.getSouth(), bounds.getWest()],
+          [bounds.getNorth(), bounds.getEast()],
+        ],
+      })
+    },
+  })
+
+  useEffect(() => {
+    const bounds = map.getBounds()
+    onViewportChange({
+      zoom: map.getZoom(),
+      bounds: [
+        [bounds.getSouth(), bounds.getWest()],
+        [bounds.getNorth(), bounds.getEast()],
+      ],
+    })
+  }, [map, onViewportChange])
+
+  return null
+}
+
 function getFeaturePoints(feature: GeometryFeature): LatLngTuple[] {
   if (feature.geometry === 'point') {
     return [feature.position]
@@ -526,6 +601,146 @@ function midpoint(a: LatLngTuple, b: LatLngTuple): LatLngTuple {
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
 }
 
+function clonePointList(points: LatLngTuple[]): LatLngTuple[] {
+  return points.map((point) => [point[0], point[1]])
+}
+
+function projectPointToMeters(point: LatLngTuple, latitudeRef: number) {
+  const latitudeFactor = 110_540
+  const longitudeFactor = 111_320 * Math.cos((latitudeRef * Math.PI) / 180)
+  return {
+    x: point[1] * longitudeFactor,
+    y: point[0] * latitudeFactor,
+  }
+}
+
+function unprojectPointFromMeters(
+  projected: { x: number; y: number },
+  latitudeRef: number,
+): LatLngTuple {
+  const latitudeFactor = 110_540
+  const longitudeFactor = 111_320 * Math.cos((latitudeRef * Math.PI) / 180)
+  return [projected.y / latitudeFactor, projected.x / longitudeFactor]
+}
+
+function distanceMeters(a: LatLngTuple, b: LatLngTuple): number {
+  const refLat = (a[0] + b[0]) / 2
+  const pa = projectPointToMeters(a, refLat)
+  const pb = projectPointToMeters(b, refLat)
+  const dx = pa.x - pb.x
+  const dy = pa.y - pb.y
+  return Math.hypot(dx, dy)
+}
+
+function closestPointOnSegment(
+  point: LatLngTuple,
+  segment: SnapSegment,
+): { point: LatLngTuple; distanceMeters: number } {
+  const latitudeRef = (point[0] + segment.start[0] + segment.end[0]) / 3
+  const p = projectPointToMeters(point, latitudeRef)
+  const a = projectPointToMeters(segment.start, latitudeRef)
+  const b = projectPointToMeters(segment.end, latitudeRef)
+  const abX = b.x - a.x
+  const abY = b.y - a.y
+  const abLengthSquared = abX * abX + abY * abY
+  if (abLengthSquared === 0) {
+    return {
+      point: segment.start,
+      distanceMeters: Math.hypot(p.x - a.x, p.y - a.y),
+    }
+  }
+
+  const t = ((p.x - a.x) * abX + (p.y - a.y) * abY) / abLengthSquared
+  const clamped = Math.max(0, Math.min(1, t))
+  const projected = {
+    x: a.x + clamped * abX,
+    y: a.y + clamped * abY,
+  }
+  return {
+    point: unprojectPointFromMeters(projected, latitudeRef),
+    distanceMeters: Math.hypot(p.x - projected.x, p.y - projected.y),
+  }
+}
+
+function computePolylineLength(points: LatLngTuple[]): number {
+  if (points.length < 2) {
+    return 0
+  }
+  let total = 0
+  for (let index = 1; index < points.length; index += 1) {
+    total += distanceMeters(points[index - 1], points[index])
+  }
+  return total
+}
+
+function computePolygonArea(points: LatLngTuple[]): number {
+  if (points.length < 3) {
+    return 0
+  }
+
+  const latitudeRef =
+    points.reduce((sum, point) => sum + point[0], 0) / points.length
+  const projected = points.map((point) => projectPointToMeters(point, latitudeRef))
+  let twiceArea = 0
+  for (let index = 0; index < projected.length; index += 1) {
+    const current = projected[index]
+    const next = projected[(index + 1) % projected.length]
+    twiceArea += current.x * next.y - next.x * current.y
+  }
+  return Math.abs(twiceArea) / 2
+}
+
+function formatDistance(valueMeters: number): string {
+  if (!Number.isFinite(valueMeters) || valueMeters <= 0) {
+    return '0 m'
+  }
+  if (valueMeters >= 1000) {
+    return `${(valueMeters / 1000).toFixed(2)} km`
+  }
+  return `${Math.round(valueMeters)} m`
+}
+
+function formatSurface(valueSquareMeters: number): string {
+  if (!Number.isFinite(valueSquareMeters) || valueSquareMeters <= 0) {
+    return '0 m²'
+  }
+  if (valueSquareMeters >= 1_000_000) {
+    return `${(valueSquareMeters / 1_000_000).toFixed(2)} km²`
+  }
+  if (valueSquareMeters >= 10_000) {
+    return `${(valueSquareMeters / 10_000).toFixed(2)} ha`
+  }
+  return `${Math.round(valueSquareMeters)} m²`
+}
+
+function offsetFeatureCoordinates(
+  geometry: DrawGeometry,
+  points: LatLngTuple[],
+  offset: LatLngTuple,
+): unknown {
+  if (geometry === 'point') {
+    const point = points[0]
+    return [point[0] + offset[0], point[1] + offset[1]]
+  }
+  return points.map((point) => [point[0] + offset[0], point[1] + offset[1]])
+}
+
+function getGridStepForZoom(zoom: number): number {
+  if (zoom <= 10) {
+    return 0.05
+  }
+  if (zoom <= 12) {
+    return 0.02
+  }
+  if (zoom <= 14) {
+    return 0.01
+  }
+  if (zoom <= 16) {
+    return 0.005
+  }
+  return 0.002
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -562,6 +777,19 @@ function App() {
     useState<LatLngTuple | null>(null)
   const [featureContextMenu, setFeatureContextMenu] =
     useState<FeatureContextMenuState | null>(null)
+  const [isMeasureMode, setIsMeasureMode] = useState(false)
+  const [measureGeometry, setMeasureGeometry] = useState<MeasureGeometry>('line')
+  const [measurePoints, setMeasurePoints] = useState<LatLngTuple[]>([])
+  const [isSnappingEnabled, setIsSnappingEnabled] = useState(true)
+  const [snapToleranceMeters, setSnapToleranceMeters] = useState(20)
+  const [snapPreview, setSnapPreview] = useState<SnapPreviewState | null>(null)
+  const [isGridEnabled, setIsGridEnabled] = useState(false)
+  const [mapViewport, setMapViewport] = useState<{
+    zoom: number
+    bounds: [LatLngTuple, LatLngTuple]
+  } | null>(null)
+  const [localHistoryPast, setLocalHistoryPast] = useState<LocalHistoryEntry[]>([])
+  const [localHistoryFuture, setLocalHistoryFuture] = useState<LocalHistoryEntry[]>([])
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() =>
     buildDefaultDraft(fallbackLayers),
   )
@@ -583,7 +811,8 @@ function App() {
   const isDrawingOnMap =
     isAdmin &&
     (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
-  const isMapInteractionCaptureEnabled = isDrawingOnMap || isZoneSelectionMode
+  const isMapInteractionCaptureEnabled =
+    isDrawingOnMap || isZoneSelectionMode || isMeasureMode
   const isDirectGeometryEditing =
     isAdmin && adminMode === 'edit' && !isRedrawingEditGeometry
 
@@ -867,6 +1096,221 @@ function App() {
     [layers],
   )
 
+  const snapCandidates = useMemo(() => {
+    const vertices: LatLngTuple[] = []
+    const segments: SnapSegment[] = []
+
+    for (const layer of visibleLayers) {
+      for (const feature of layer.features) {
+        if (feature.geometry === 'point') {
+          vertices.push(feature.position)
+          continue
+        }
+
+        const points = feature.positions
+        for (let index = 0; index < points.length; index += 1) {
+          vertices.push(points[index])
+          if (index > 0) {
+            segments.push({
+              start: points[index - 1],
+              end: points[index],
+            })
+          }
+        }
+        if (feature.geometry === 'polygon' && points.length >= 3) {
+          segments.push({
+            start: points[points.length - 1],
+            end: points[0],
+          })
+        }
+      }
+    }
+
+    return { vertices, segments }
+  }, [visibleLayers])
+
+  const findSnapResult = useCallback(
+    (rawPosition: LatLngTuple): SnapPreviewState | null => {
+      if (!isSnappingEnabled) {
+        return null
+      }
+
+      let best: SnapPreviewState | null = null
+      for (const vertex of snapCandidates.vertices) {
+        const dist = distanceMeters(rawPosition, vertex)
+        if (dist > snapToleranceMeters) {
+          continue
+        }
+        if (!best || dist < best.distanceMeters) {
+          best = {
+            position: vertex,
+            type: 'vertex',
+            distanceMeters: dist,
+          }
+        }
+      }
+
+      for (const segment of snapCandidates.segments) {
+        const projected = closestPointOnSegment(rawPosition, segment)
+        if (projected.distanceMeters > snapToleranceMeters) {
+          continue
+        }
+        if (!best || projected.distanceMeters < best.distanceMeters) {
+          best = {
+            position: projected.point,
+            type: 'segment',
+            distanceMeters: projected.distanceMeters,
+          }
+        }
+      }
+
+      return best
+    },
+    [isSnappingEnabled, snapCandidates.segments, snapCandidates.vertices, snapToleranceMeters],
+  )
+
+  const measureLengthMeters = useMemo(
+    () => computePolylineLength(measurePoints),
+    [measurePoints],
+  )
+  const measurePerimeterMeters = useMemo(() => {
+    if (measureGeometry !== 'polygon' || measurePoints.length < 3) {
+      return 0
+    }
+    return computePolylineLength([...measurePoints, measurePoints[0]])
+  }, [measureGeometry, measurePoints])
+  const measureAreaSquareMeters = useMemo(() => {
+    if (measureGeometry !== 'polygon') {
+      return 0
+    }
+    return computePolygonArea(measurePoints)
+  }, [measureGeometry, measurePoints])
+
+  const gridLines = useMemo(() => {
+    if (!isGridEnabled || !mapViewport) {
+      return [] as Array<{ id: string; positions: LatLngTuple[] }>
+    }
+
+    const step = getGridStepForZoom(mapViewport.zoom)
+    const [southWest, northEast] = mapViewport.bounds
+    const south = southWest[0]
+    const west = southWest[1]
+    const north = northEast[0]
+    const east = northEast[1]
+    const latStart = Math.floor(south / step) * step
+    const lngStart = Math.floor(west / step) * step
+
+    const lines: Array<{ id: string; positions: LatLngTuple[] }> = []
+    for (let lat = latStart; lat <= north + step; lat += step) {
+      lines.push({
+        id: `grid-lat-${lat.toFixed(6)}`,
+        positions: [
+          [lat, west],
+          [lat, east],
+        ],
+      })
+    }
+    for (let lng = lngStart; lng <= east + step; lng += step) {
+      lines.push({
+        id: `grid-lng-${lng.toFixed(6)}`,
+        positions: [
+          [south, lng],
+          [north, lng],
+        ],
+      })
+    }
+    return lines
+  }, [isGridEnabled, mapViewport])
+
+  const captureLocalHistorySnapshot = useCallback(
+    (): LocalHistorySnapshot => ({
+      createPoints: clonePointList(createPoints),
+      editPoints: clonePointList(editPoints),
+      measurePoints: clonePointList(measurePoints),
+    }),
+    [createPoints, editPoints, measurePoints],
+  )
+
+  const applyLocalHistorySnapshot = useCallback((snapshot: LocalHistorySnapshot) => {
+    setCreatePoints(clonePointList(snapshot.createPoints))
+    setEditPoints(clonePointList(snapshot.editPoints))
+    setMeasurePoints(clonePointList(snapshot.measurePoints))
+  }, [])
+
+  const pushLocalHistory = useCallback(
+    (label: string) => {
+      const snapshot = captureLocalHistorySnapshot()
+      const entry: LocalHistoryEntry = {
+        label,
+        snapshot,
+        createdAt: Date.now(),
+      }
+      setLocalHistoryPast((current) => {
+        const next = [...current, entry]
+        return next.length > 60 ? next.slice(next.length - 60) : next
+      })
+      setLocalHistoryFuture([])
+    },
+    [captureLocalHistorySnapshot],
+  )
+
+  const handleLocalUndo = useCallback(() => {
+    const entry = localHistoryPast[localHistoryPast.length - 1]
+    if (!entry) {
+      setAdminNotice('Aucune action a annuler.')
+      return
+    }
+
+    const currentSnapshot = captureLocalHistorySnapshot()
+    setLocalHistoryPast(localHistoryPast.slice(0, -1))
+    setLocalHistoryFuture((current) => [
+      ...current,
+      {
+        label: entry.label,
+        snapshot: currentSnapshot,
+        createdAt: Date.now(),
+      },
+    ])
+    applyLocalHistorySnapshot(entry.snapshot)
+    setSnapPreview(null)
+    setAdminNotice(`Annule: ${entry.label}`)
+  }, [
+    applyLocalHistorySnapshot,
+    captureLocalHistorySnapshot,
+    localHistoryPast,
+  ])
+
+  const handleLocalRedo = useCallback(() => {
+    const entry = localHistoryFuture[localHistoryFuture.length - 1]
+    if (!entry) {
+      setAdminNotice('Aucune action a retablir.')
+      return
+    }
+
+    const currentSnapshot = captureLocalHistorySnapshot()
+    setLocalHistoryFuture(localHistoryFuture.slice(0, -1))
+    setLocalHistoryPast((current) => [
+      ...current,
+      {
+        label: entry.label,
+        snapshot: currentSnapshot,
+        createdAt: Date.now(),
+      },
+    ])
+    applyLocalHistorySnapshot(entry.snapshot)
+    setSnapPreview(null)
+    setAdminNotice(`Retabli: ${entry.label}`)
+  }, [
+    applyLocalHistorySnapshot,
+    captureLocalHistorySnapshot,
+    localHistoryFuture,
+  ])
+
+  const visibleHistoryEntries = useMemo(
+    () => localHistoryPast.slice(-6).reverse(),
+    [localHistoryPast],
+  )
+
   const refreshTrash = useCallback(async () => {
     if (!isAdmin) {
       setTrashItems([])
@@ -1038,22 +1482,67 @@ function App() {
       }
       setFeatureContextMenu(null)
 
+      const snap = findSnapResult(position)
+      const resolvedPosition = snap?.position ?? position
+
+      if (isMeasureMode) {
+        pushLocalHistory('Mesure: ajout point')
+        setMeasurePoints((current) => [...current, resolvedPosition])
+        if (snap) {
+          setAdminNotice(
+            `Mesure: point ajoute avec accroche ${snap.type} (${Math.round(
+              snap.distanceMeters,
+            )} m).`,
+          )
+        } else {
+          setAdminNotice('Mesure: point ajoute.')
+        }
+        return
+      }
+
       if (adminMode === 'create') {
+        pushLocalHistory('Creation: ajout point')
         setCreatePoints((current) =>
-          createDraft.geometry === 'point' ? [position] : [...current, position],
+          createDraft.geometry === 'point'
+            ? [resolvedPosition]
+            : [...current, resolvedPosition],
         )
-        setAdminNotice(null)
+        if (snap) {
+          setAdminNotice(
+            `Point accroche ${snap.type} (${Math.round(snap.distanceMeters)} m).`,
+          )
+        } else {
+          setAdminNotice(null)
+        }
         return
       }
 
       if (adminMode === 'edit' && isRedrawingEditGeometry && editDraft) {
+        pushLocalHistory('Edition: ajout point')
         setEditPoints((current) =>
-          editDraft.geometry === 'point' ? [position] : [...current, position],
+          editDraft.geometry === 'point'
+            ? [resolvedPosition]
+            : [...current, resolvedPosition],
         )
-        setAdminNotice(null)
+        if (snap) {
+          setAdminNotice(
+            `Point accroche ${snap.type} (${Math.round(snap.distanceMeters)} m).`,
+          )
+        } else {
+          setAdminNotice(null)
+        }
       }
     },
-    [adminMode, createDraft.geometry, editDraft, isAdmin, isRedrawingEditGeometry],
+    [
+      adminMode,
+      createDraft.geometry,
+      editDraft,
+      findSnapResult,
+      isAdmin,
+      isMeasureMode,
+      isRedrawingEditGeometry,
+      pushLocalHistory,
+    ],
   )
 
   const handleMapMouseMove = useCallback(
@@ -1064,11 +1553,32 @@ function App() {
         !isZoneSelectionDragging ||
         !zoneSelectionStart
       ) {
+        const shouldPreviewSnap =
+          isMeasureMode ||
+          adminMode === 'create' ||
+          (adminMode === 'edit' && isRedrawingEditGeometry)
+        if (!shouldPreviewSnap) {
+          if (snapPreview) {
+            setSnapPreview(null)
+          }
+          return
+        }
+        setSnapPreview(findSnapResult(position))
         return
       }
       setZoneSelectionCurrent(position)
     },
-    [isAdmin, isZoneSelectionDragging, isZoneSelectionMode, zoneSelectionStart],
+    [
+      adminMode,
+      findSnapResult,
+      isAdmin,
+      isMeasureMode,
+      isRedrawingEditGeometry,
+      isZoneSelectionDragging,
+      isZoneSelectionMode,
+      snapPreview,
+      zoneSelectionStart,
+    ],
   )
 
   const handleMapMouseDown = useCallback(
@@ -1077,6 +1587,7 @@ function App() {
         return
       }
       setFeatureContextMenu(null)
+      setSnapPreview(null)
       setZoneSelectionStart(position)
       setZoneSelectionCurrent(position)
       setIsZoneSelectionDragging(true)
@@ -1116,6 +1627,7 @@ function App() {
       setIsZoneSelectionMode(false)
       setZoneSelectionStart(null)
       setZoneSelectionCurrent(null)
+      setSnapPreview(null)
       setAdminNotice(
         uniqueIds.length > 0
           ? `${uniqueIds.length} element(s) selectionne(s) par zone.`
@@ -1142,6 +1654,8 @@ function App() {
 
       if (mode === 'create' && geometry) {
         setAdminMode('create')
+        setIsMeasureMode(false)
+        setSnapPreview(null)
         setIsZoneSelectionMode(false)
         setIsZoneSelectionDragging(false)
         setZoneSelectionStart(null)
@@ -1158,6 +1672,8 @@ function App() {
 
       if (mode === 'edit') {
         setAdminMode('edit')
+        setIsMeasureMode(false)
+        setSnapPreview(null)
         setFeatureContextMenu(null)
         setIsRedrawingEditGeometry(false)
         return
@@ -1165,6 +1681,8 @@ function App() {
 
       if (mode === 'delete') {
         setAdminMode('delete')
+        setIsMeasureMode(false)
+        setSnapPreview(null)
         setFeatureContextMenu(null)
       }
     },
@@ -1226,12 +1744,17 @@ function App() {
     setZoneSelectionStart(null)
     setZoneSelectionCurrent(null)
     setFeatureContextMenu(null)
+    setIsMeasureMode(false)
+    setMeasurePoints([])
+    setSnapPreview(null)
+    setLocalHistoryPast([])
+    setLocalHistoryFuture([])
     setTrashItems([])
     setVersionItems([])
     setAdminNotice('Mode admin desactive.')
   }
 
-  const handleCreateFeature = async () => {
+  const handleCreateFeature = useCallback(async () => {
     if (!supabase || !isAdmin) {
       setAdminNotice('Connexion admin requise.')
       return
@@ -1324,9 +1847,16 @@ function App() {
     setAdminMode('edit')
     setIsSaving(false)
     setAdminNotice('Element cree et enregistre.')
-  }
+  }, [
+    createDraft,
+    createPoints,
+    isAdmin,
+    layers,
+    refreshFeatureVersions,
+    syncSupabaseLayers,
+  ])
 
-  const handleSaveEdition = async () => {
+  const handleSaveEdition = useCallback(async () => {
     if (!supabase || !isAdmin || !selectedFeatureId || !editDraft) {
       setAdminNotice('Selectionne un element a modifier.')
       return
@@ -1395,7 +1925,15 @@ function App() {
     await refreshFeatureVersions(selectedFeatureId)
     setIsSaving(false)
     setAdminNotice('Element modifie.')
-  }
+  }, [
+    editDraft,
+    editPoints,
+    isAdmin,
+    layers,
+    refreshFeatureVersions,
+    selectedFeatureId,
+    syncSupabaseLayers,
+  ])
 
   const handleDeleteFeatureByIds = useCallback(
     async (ids: string[]) => {
@@ -1474,6 +2012,112 @@ function App() {
     await handleDeleteFeatureByIds(ids)
   }, [handleDeleteFeatureByIds, isAdmin, selectedFeatureId, selectedFeatureIds])
 
+  const handleDuplicateSelection = useCallback(async (targetIds?: string[]) => {
+    if (!supabase || !isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+
+    const ids =
+      targetIds && targetIds.length > 0
+        ? targetIds
+        : selectedFeatureIds.length > 0
+        ? selectedFeatureIds
+        : selectedFeatureId
+          ? [selectedFeatureId]
+          : []
+    if (ids.length === 0) {
+      setAdminNotice('Selectionne un element a dupliquer.')
+      return
+    }
+
+    const refs = ids
+      .map((id) => featureById.get(id))
+      .filter((value): value is FeatureRef => Boolean(value))
+    if (refs.length === 0) {
+      setAdminNotice('Aucun element duplicable.')
+      return
+    }
+
+    const baseOffset: LatLngTuple = [0.00035, 0.00035]
+    const layerCounts = new Map<string, number>()
+    const rows = refs.map((ref, index) => {
+      const key = `${ref.category}::${ref.layerId}`
+      const currentCount =
+        layerCounts.get(key) ??
+        (layers.find((layer) => layer.id === ref.layerId)?.features.length ?? 0)
+      const nextCount = currentCount + 1
+      layerCounts.set(key, nextCount)
+
+      const layerEntry = layers.find(
+        (layer) => layer.id === ref.layerId && layer.category === ref.category,
+      )
+      const layerSortOrder =
+        layerEntry !== undefined
+          ? getLayerSortOrderValue(layerEntry)
+          : layers
+              .filter((layer) => layer.category === ref.category)
+              .reduce(
+                (maxOrder, layer, layerIndex) =>
+                  Math.max(maxOrder, getLayerSortOrderValue(layer, layerIndex)),
+                -1,
+              ) + 1
+
+      const offset: LatLngTuple = [
+        baseOffset[0] * (index + 1),
+        baseOffset[1] * (index + 1),
+      ]
+      const newId = `duplicate_${crypto.randomUUID()}`
+      const points = getFeaturePoints(ref.feature)
+      return {
+        id: newId,
+        name: `${ref.feature.name} (copie)`,
+        status: ref.feature.status,
+        category: ref.category,
+        layer_id: ref.layerId,
+        layer_label: ref.layerLabel,
+        layer_sort_order: layerSortOrder,
+        color: ref.feature.color,
+        geometry_type: ref.feature.geometry,
+        coordinates: offsetFeatureCoordinates(ref.feature.geometry, points, offset),
+        sort_order: nextCount,
+        source: 'manual_duplicate',
+      }
+    })
+
+    setIsSaving(true)
+    setAdminNotice(null)
+    const { error } = await supabase.from('map_features').insert(rows)
+    if (error) {
+      setIsSaving(false)
+      setAdminNotice(`Erreur duplication: ${error.message}`)
+      return
+    }
+
+    const firstLayerId = rows[0]?.layer_id
+    await syncSupabaseLayers(firstLayerId)
+    const duplicatedIds = rows.map((row) => row.id)
+    setSelectedFeatureIds(duplicatedIds)
+    if (duplicatedIds[0]) {
+      void focusFeatureById(duplicatedIds[0], 'keep')
+    }
+    setAdminMode('edit')
+    setIsSaving(false)
+    setAdminNotice(
+      duplicatedIds.length > 1
+        ? `${duplicatedIds.length} elements dupliques.`
+        : 'Element duplique.',
+    )
+  }, [
+    featureById,
+    focusFeatureById,
+    isAdmin,
+    layers,
+    selectedFeatureId,
+    selectedFeatureIds,
+    syncSupabaseLayers,
+  ])
+
   const handleToggleZoneSelection = useCallback(() => {
     if (!isAdmin) {
       setAdminNotice('Connexion admin requise.')
@@ -1491,6 +2135,8 @@ function App() {
       return
     }
     setFeatureContextMenu(null)
+    setIsMeasureMode(false)
+    setSnapPreview(null)
     setIsZoneSelectionMode(true)
     setIsZoneSelectionDragging(false)
     setZoneSelectionStart(null)
@@ -1503,8 +2149,75 @@ function App() {
     setAdminNotice('Selection multiple reinitialisee.')
   }, [selectedFeatureId])
 
+  const handleToggleMeasureMode = useCallback(() => {
+    if (!isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+    if (isMeasureMode) {
+      setIsMeasureMode(false)
+      setSnapPreview(null)
+      setAdminNotice('Outil mesure desactive.')
+      return
+    }
+
+    setFeatureContextMenu(null)
+    setIsZoneSelectionMode(false)
+    setIsZoneSelectionDragging(false)
+    setZoneSelectionStart(null)
+    setZoneSelectionCurrent(null)
+    setSnapPreview(null)
+    setIsMeasureMode(true)
+    setAdminNotice('Outil mesure actif: clique sur la carte pour poser des points.')
+  }, [isAdmin, isMeasureMode])
+
+  const handleResetMeasure = useCallback(() => {
+    if (measurePoints.length === 0) {
+      return
+    }
+    pushLocalHistory('Mesure: reinitialiser')
+    setMeasurePoints([])
+    setSnapPreview(null)
+    setAdminNotice('Mesure reinitialisee.')
+  }, [measurePoints.length, pushLocalHistory])
+
+  const handleChangeMeasureGeometry = useCallback(
+    (geometry: MeasureGeometry) => {
+      if (geometry === measureGeometry) {
+        return
+      }
+      if (measurePoints.length > 0) {
+        pushLocalHistory('Mesure: changement de type')
+      }
+      setMeasureGeometry(geometry)
+      setMeasurePoints([])
+      setSnapPreview(null)
+      setAdminNotice(`Mesure basculee en mode ${MEASURE_GEOMETRY_LABELS[geometry]}.`)
+    },
+    [measureGeometry, measurePoints.length, pushLocalHistory],
+  )
+
+  const handleToggleGrid = useCallback(() => {
+    const next = !isGridEnabled
+    setIsGridEnabled(next)
+    setAdminNotice(next ? 'Grille d aide activee.' : 'Grille d aide desactivee.')
+  }, [isGridEnabled])
+
+  const handleToggleSnapping = useCallback(() => {
+    const next = !isSnappingEnabled
+    setIsSnappingEnabled(next)
+    setAdminNotice(next ? 'Snapping actif.' : 'Snapping desactive.')
+    setSnapPreview(null)
+  }, [isSnappingEnabled])
+
+  const handleClearLocalHistory = useCallback(() => {
+    setLocalHistoryPast([])
+    setLocalHistoryFuture([])
+    setAdminNotice('Historique local efface.')
+  }, [])
+
   const handleContextMenuAction = useCallback(
-    async (action: 'edit' | 'toggle' | 'delete') => {
+    async (action: 'edit' | 'toggle' | 'duplicate' | 'delete') => {
       if (!featureContextMenu) {
         return
       }
@@ -1542,11 +2255,17 @@ function App() {
         return
       }
 
+      if (action === 'duplicate') {
+        await handleDuplicateSelection([featureId])
+        return
+      }
+
       await handleDeleteFeatureByIds([featureId])
     },
     [
       featureContextMenu,
       focusFeatureById,
+      handleDuplicateSelection,
       handleDeleteFeatureByIds,
       selectedFeatureIdSet,
       selectedFeatureIds,
@@ -1555,6 +2274,26 @@ function App() {
 
   const handleMapDoubleClick = () => {
     if (!isAdmin) {
+      return
+    }
+
+    if (isMeasureMode) {
+      if (
+        (measureGeometry === 'line' && measurePoints.length < 2) ||
+        (measureGeometry === 'polygon' && measurePoints.length < 3)
+      ) {
+        setAdminNotice('Mesure incomplete: ajoute plus de points.')
+        return
+      }
+      if (measureGeometry === 'line') {
+        setAdminNotice(`Distance mesuree: ${formatDistance(measureLengthMeters)}.`)
+      } else {
+        setAdminNotice(
+          `Surface mesuree: ${formatSurface(measureAreaSquareMeters)} (perimetre ${formatDistance(
+            measurePerimeterMeters,
+          )}).`,
+        )
+      }
       return
     }
 
@@ -1591,16 +2330,25 @@ function App() {
       setIsZoneSelectionDragging(false)
       setZoneSelectionStart(null)
       setZoneSelectionCurrent(null)
+      setSnapPreview(null)
       setAdminNotice('Selection zone annulee.')
       return
     }
 
+    if (isMeasureMode && measurePoints.length > 0) {
+      pushLocalHistory('Mesure: annuler dernier point')
+      setMeasurePoints((current) => current.slice(0, -1))
+      return
+    }
+
     if (adminMode === 'create' && createPoints.length > 0) {
+      pushLocalHistory('Creation: annuler dernier point')
       setCreatePoints((current) => current.slice(0, -1))
       return
     }
 
     if (adminMode === 'edit' && isRedrawingEditGeometry && editPoints.length > 0) {
+      pushLocalHistory('Edition: annuler dernier point')
       setEditPoints((current) => current.slice(0, -1))
     }
   }
@@ -1623,12 +2371,26 @@ function App() {
     [handleMoveEditVertex],
   )
 
+  const handleEditVertexDragStart = useCallback(() => {
+    pushLocalHistory('Edition: deplacement sommet')
+  }, [pushLocalHistory])
+
   const handleEditVertexDragEnd = useCallback(
     (index: number, event: LeafletEvent) => {
-      handleMoveEditVertex(index, markerEventToPosition(event))
-      setAdminNotice('Geometrie ajustee. Clique sur "Enregistrer" pour valider.')
+      const rawPosition = markerEventToPosition(event)
+      const snap = findSnapResult(rawPosition)
+      handleMoveEditVertex(index, snap?.position ?? rawPosition)
+      if (snap) {
+        setAdminNotice(
+          `Sommet ajuste avec accroche ${snap.type} (${Math.round(
+            snap.distanceMeters,
+          )} m).`,
+        )
+      } else {
+        setAdminNotice('Geometrie ajustee. Clique sur "Enregistrer" pour valider.')
+      }
     },
-    [handleMoveEditVertex],
+    [findSnapResult, handleMoveEditVertex],
   )
 
   const handleInsertEditVertex = useCallback(
@@ -1636,6 +2398,7 @@ function App() {
       if (!editDraft || editDraft.geometry === 'point') {
         return
       }
+      pushLocalHistory('Edition: insertion sommet')
       setEditPoints((current) => {
         if (current.length < 2) {
           return current
@@ -1647,7 +2410,7 @@ function App() {
       })
       setAdminNotice('Sommet ajoute. Clique sur "Enregistrer" pour valider.')
     },
-    [editDraft],
+    [editDraft, pushLocalHistory],
   )
 
   const handleDeleteEditVertex = useCallback(
@@ -1657,6 +2420,7 @@ function App() {
       }
 
       const minPoints = MIN_POINTS_REQUIRED[editDraft.geometry]
+      pushLocalHistory('Edition: suppression sommet')
       setEditPoints((current) => {
         if (current.length <= minPoints || index < 0 || index >= current.length) {
           return current
@@ -1667,7 +2431,7 @@ function App() {
       })
       setAdminNotice('Sommet supprime. Clique sur "Enregistrer" pour valider.')
     },
-    [editDraft],
+    [editDraft, pushLocalHistory],
   )
 
   const handleToolbarToggleRedraw = useCallback(() => {
@@ -1684,34 +2448,83 @@ function App() {
     }
 
     setAdminMode('edit')
+    pushLocalHistory('Edition: demarrer redessin')
     setIsRedrawingEditGeometry(true)
     setEditPoints([])
     setAdminNotice(
       'Redessin actif: clique sur la carte, puis Entrer pour enregistrer.',
     )
-  }, [editDraft, isRedrawingEditGeometry, selectedFeature])
+  }, [editDraft, isRedrawingEditGeometry, pushLocalHistory, selectedFeature])
 
   const handleToolbarUndoLastPoint = useCallback(() => {
+    if (isMeasureMode) {
+      if (measurePoints.length === 0) {
+        return
+      }
+      pushLocalHistory('Mesure: annuler dernier point')
+      setMeasurePoints((current) => current.slice(0, -1))
+      return
+    }
     if (adminMode === 'create') {
+      if (createPoints.length === 0) {
+        return
+      }
+      pushLocalHistory('Creation: annuler dernier point')
       setCreatePoints((current) => current.slice(0, -1))
       return
     }
     if (adminMode === 'edit' && isRedrawingEditGeometry) {
+      if (editPoints.length === 0) {
+        return
+      }
+      pushLocalHistory('Edition: annuler dernier point')
       setEditPoints((current) => current.slice(0, -1))
     }
-  }, [adminMode, isRedrawingEditGeometry])
+  }, [
+    adminMode,
+    createPoints.length,
+    editPoints.length,
+    isMeasureMode,
+    isRedrawingEditGeometry,
+    measurePoints.length,
+    pushLocalHistory,
+  ])
 
   const handleToolbarClearPoints = useCallback(() => {
+    if (isMeasureMode) {
+      if (measurePoints.length === 0) {
+        return
+      }
+      pushLocalHistory('Mesure: effacer')
+      setMeasurePoints([])
+      return
+    }
     if (adminMode === 'create') {
+      if (createPoints.length === 0) {
+        return
+      }
+      pushLocalHistory('Creation: effacer')
       setCreatePoints([])
       return
     }
     if (adminMode === 'edit' && isRedrawingEditGeometry) {
+      if (editPoints.length === 0) {
+        return
+      }
+      pushLocalHistory('Edition: effacer')
       setEditPoints([])
     }
-  }, [adminMode, isRedrawingEditGeometry])
+  }, [
+    adminMode,
+    createPoints.length,
+    editPoints.length,
+    isMeasureMode,
+    isRedrawingEditGeometry,
+    measurePoints.length,
+    pushLocalHistory,
+  ])
 
-  const handleToolbarPrimaryAction = () => {
+  const handleToolbarPrimaryAction = useCallback(() => {
     if (adminMode === 'create') {
       void handleCreateFeature()
       return
@@ -1726,7 +2539,15 @@ function App() {
     ) {
       void handleDeleteFeature()
     }
-  }
+  }, [
+    adminMode,
+    editDraft,
+    handleCreateFeature,
+    handleDeleteFeature,
+    handleSaveEdition,
+    selectedFeatureId,
+    selectedFeatureIds,
+  ])
 
   const handleRestoreFromTrash = async (featureId: string) => {
     if (!isAdmin) {
@@ -2055,6 +2876,33 @@ function App() {
       }
 
       const key = event.key.toLowerCase()
+      const isMeta = event.metaKey || event.ctrlKey
+      if (isMeta && !event.shiftKey && key === 'z') {
+        event.preventDefault()
+        handleLocalUndo()
+        return
+      }
+      if (isMeta && ((event.shiftKey && key === 'z') || key === 'y')) {
+        event.preventDefault()
+        handleLocalRedo()
+        return
+      }
+
+      if (key === 'm') {
+        event.preventDefault()
+        handleToggleMeasureMode()
+        return
+      }
+      if (key === 'g') {
+        event.preventDefault()
+        handleToggleGrid()
+        return
+      }
+      if (key === 'x') {
+        event.preventDefault()
+        handleToggleSnapping()
+        return
+      }
       if (key === '1') {
         event.preventDefault()
         handleToolbarToolClick('create', 'point')
@@ -2166,6 +3014,18 @@ function App() {
           setAdminNotice('Selection zone annulee.')
           return
         }
+        if (isMeasureMode) {
+          event.preventDefault()
+          if (measurePoints.length > 0) {
+            setMeasurePoints([])
+            setAdminNotice('Mesure reinitialisee.')
+          } else {
+            setIsMeasureMode(false)
+            setAdminNotice('Outil mesure desactive.')
+          }
+          setSnapPreview(null)
+          return
+        }
         if (adminMode !== 'view') {
           event.preventDefault()
           setAdminMode('view')
@@ -2185,12 +3045,19 @@ function App() {
     editPoints,
     handleToolbarPrimaryAction,
     handleToggleZoneSelection,
+    handleToggleGrid,
+    handleToggleMeasureMode,
+    handleToggleSnapping,
     handleToolbarToggleRedraw,
     handleToolbarToolClick,
     handleToolbarUndoLastPoint,
+    handleLocalRedo,
+    handleLocalUndo,
     isAdmin,
+    isMeasureMode,
     isRedrawingEditGeometry,
     isZoneSelectionMode,
+    measurePoints.length,
     selectedFeature,
     selectedFeatureId,
     selectedFeatureIds,
@@ -2409,6 +3276,7 @@ function App() {
           draggable
           icon={pointHandleIcon}
           eventHandlers={{
+            dragstart: () => handleEditVertexDragStart(),
             drag: (event) => handleEditVertexDrag(0, event),
             dragend: (event) => handleEditVertexDragEnd(0, event),
           }}
@@ -2423,6 +3291,7 @@ function App() {
         draggable
         icon={vertexHandleIcon}
         eventHandlers={{
+          dragstart: () => handleEditVertexDragStart(),
           drag: (event) => handleEditVertexDrag(index, event),
           dragend: (event) => handleEditVertexDragEnd(index, event),
           contextmenu: (event: LeafletMouseEvent) => {
@@ -2576,25 +3445,35 @@ function App() {
       })
 
   const toolbarPointCount =
-    adminMode === 'create'
+    isMeasureMode
+      ? measurePoints.length
+      : adminMode === 'create'
       ? createPoints.length
       : adminMode === 'edit' && isRedrawingEditGeometry
         ? editPoints.length
         : 0
   const toolbarMinPoints =
-    adminMode === 'create'
+    isMeasureMode
+      ? measureGeometry === 'line'
+        ? 2
+        : 3
+      : adminMode === 'create'
       ? MIN_POINTS_REQUIRED[createDraft.geometry]
       : adminMode === 'edit' && isRedrawingEditGeometry && editDraft
         ? MIN_POINTS_REQUIRED[editDraft.geometry]
         : 0
   const toolbarCanUndo =
-    adminMode === 'create'
+    isMeasureMode
+      ? measurePoints.length > 0
+      : adminMode === 'create'
       ? createPoints.length > 0
       : adminMode === 'edit' && isRedrawingEditGeometry
         ? editPoints.length > 0
         : false
   const toolbarCanClear =
-    adminMode === 'create'
+    isMeasureMode
+      ? measurePoints.length > 0
+      : adminMode === 'create'
       ? createPoints.length > 0
       : adminMode === 'edit' && isRedrawingEditGeometry
         ? editPoints.length > 0
@@ -2620,6 +3499,8 @@ function App() {
         : null
   const drawingGuideTitle =
     adminMode === 'create' ? 'Creation en cours' : 'Redessin en cours'
+  const canLocalUndo = localHistoryPast.length > 0
+  const canLocalRedo = localHistoryFuture.length > 0
 
   return (
     <div className="app-shell">
@@ -3081,7 +3962,7 @@ function App() {
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => setCreatePoints((current) => current.slice(0, -1))}
+                        onClick={handleToolbarUndoLastPoint}
                         disabled={createPoints.length === 0}
                       >
                         Annuler dernier point
@@ -3089,7 +3970,7 @@ function App() {
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => setCreatePoints([])}
+                        onClick={handleToolbarClearPoints}
                         disabled={createPoints.length === 0}
                       >
                         Reinitialiser
@@ -3249,9 +4130,7 @@ function App() {
                           <button
                             type="button"
                             className="ghost-button"
-                            onClick={() =>
-                              setEditPoints((current) => current.slice(0, -1))
-                            }
+                            onClick={handleToolbarUndoLastPoint}
                             disabled={!isRedrawingEditGeometry || editPoints.length === 0}
                           >
                             Annuler dernier point
@@ -3276,6 +4155,14 @@ function App() {
                             onClick={handleSaveEdition}
                           >
                             {isSaving ? 'Sauvegarde...' : 'Enregistrer'}
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={isSaving || !selectedFeatureId}
+                            onClick={() => void handleDuplicateSelection()}
+                          >
+                            Dupliquer
                           </button>
                           <button
                             type="button"
@@ -3520,7 +4407,7 @@ function App() {
       </aside>
 
       <main
-        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isZoneSelectionMode ? ' is-zone-selecting' : ''}`}
+        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isZoneSelectionMode ? ' is-zone-selecting' : ''}${isMeasureMode ? ' is-measuring' : ''}`}
       >
         {isAdmin ? (
           <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
@@ -3548,12 +4435,14 @@ function App() {
             </div>
             <p className="map-toolbar-hint">
               Mode actif:{' '}
-              {adminMode === 'create'
+              {isMeasureMode
+                ? `Mesure ${MEASURE_GEOMETRY_LABELS[measureGeometry]}`
+                : adminMode === 'create'
                 ? `Creation ${DRAW_GEOMETRY_LABELS[createDraft.geometry]}`
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
             <p className="map-toolbar-shortcuts">
-              Raccourcis: 1/2/3, E, D, R, Z, Shift+clic, Entrer, Retour, Esc
+              Raccourcis: 1/2/3, E, D, R, Z, M, G, X, Shift+clic, Entrer, Retour, Esc, Ctrl/Cmd+Z/Y
             </p>
 
             {adminMode === 'create' ? (
@@ -3649,6 +4538,15 @@ function App() {
                       Clique un element sur la carte pour l'editer.
                     </p>
                     <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() => void handleDuplicateSelection()}
+                        disabled={isSaving || !selectedFeatureId}
+                        title="Dupliquer rapidement la selection"
+                      >
+                        Dupliquer
+                      </button>
                       <button
                         type="button"
                         className={`ghost-button mini-button${isZoneSelectionMode ? ' active' : ''}`}
@@ -3793,6 +4691,149 @@ function App() {
                 )}
               </div>
             ) : null}
+
+            <div className="map-toolbar-section">
+              <p className="map-toolbar-meta">
+                <strong>Outils avances</strong>
+              </p>
+              <div className="map-toolbar-actions">
+                <button
+                  type="button"
+                  className={`ghost-button mini-button${isMeasureMode ? ' active' : ''}`}
+                  onClick={handleToggleMeasureMode}
+                  title="Outil mesure (M)"
+                >
+                  {isMeasureMode ? 'Mesure ON' : 'Mesure'}
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-button mini-button${isSnappingEnabled ? ' active' : ''}`}
+                  onClick={handleToggleSnapping}
+                  title="Snapping magnetique (X)"
+                >
+                  {isSnappingEnabled ? 'Snap ON' : 'Snap OFF'}
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-button mini-button${isGridEnabled ? ' active' : ''}`}
+                  onClick={handleToggleGrid}
+                  title="Grille d'aide (G)"
+                >
+                  {isGridEnabled ? 'Grille ON' : 'Grille'}
+                </button>
+              </div>
+
+              <label className="map-toolbar-label small">
+                Tolerance snapping: {Math.round(snapToleranceMeters)} m
+                <input
+                  type="range"
+                  min={5}
+                  max={80}
+                  step={1}
+                  className="map-toolbar-range"
+                  value={snapToleranceMeters}
+                  onChange={(event) =>
+                    setSnapToleranceMeters(Number.parseInt(event.target.value, 10))
+                  }
+                />
+              </label>
+
+              {isMeasureMode ? (
+                <>
+                  <label className="map-toolbar-label small">
+                    Type de mesure
+                    <select
+                      className="map-toolbar-select"
+                      value={measureGeometry}
+                      onChange={(event) =>
+                        handleChangeMeasureGeometry(event.target.value as MeasureGeometry)
+                      }
+                    >
+                      <option value="line">Distance</option>
+                      <option value="polygon">Surface</option>
+                    </select>
+                  </label>
+                  <p className="map-toolbar-meta">
+                    Mesure {MEASURE_GEOMETRY_LABELS[measureGeometry]}: {measurePoints.length}{' '}
+                    point(s)
+                  </p>
+                  {measureGeometry === 'line' ? (
+                    <p className="map-toolbar-meta">
+                      Distance: <strong>{formatDistance(measureLengthMeters)}</strong>
+                    </p>
+                  ) : (
+                    <>
+                      <p className="map-toolbar-meta">
+                        Perimetre: <strong>{formatDistance(measurePerimeterMeters)}</strong>
+                      </p>
+                      <p className="map-toolbar-meta">
+                        Surface: <strong>{formatSurface(measureAreaSquareMeters)}</strong>
+                      </p>
+                    </>
+                  )}
+                  <div className="map-toolbar-actions">
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={handleToolbarUndoLastPoint}
+                      disabled={measurePoints.length === 0}
+                    >
+                      Annuler point
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={handleResetMeasure}
+                      disabled={measurePoints.length === 0}
+                    >
+                      Reinitialiser
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              <p className="map-toolbar-meta">
+                <strong>Historique local</strong> (Ctrl/Cmd+Z | Ctrl/Cmd+Y)
+              </p>
+              <div className="map-toolbar-actions">
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={handleLocalUndo}
+                  disabled={!canLocalUndo}
+                >
+                  Undo ({localHistoryPast.length})
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={handleLocalRedo}
+                  disabled={!canLocalRedo}
+                >
+                  Redo ({localHistoryFuture.length})
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={handleClearLocalHistory}
+                  disabled={!canLocalUndo && !canLocalRedo}
+                >
+                  Effacer
+                </button>
+              </div>
+              {visibleHistoryEntries.length > 0 ? (
+                <ul className="map-history-list">
+                  {visibleHistoryEntries.map((entry) => (
+                    <li key={`${entry.createdAt}-${entry.label}`}>
+                      <span>{entry.label}</span>
+                      <time>{new Date(entry.createdAt).toLocaleTimeString('fr-FR')}</time>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="map-toolbar-meta">Aucune action locale.</p>
+              )}
+            </div>
           </div>
         ) : null}
         {isAdmin && isGuidedDrawing && guideGeometry ? (
@@ -3853,6 +4894,13 @@ function App() {
             </button>
             <button
               type="button"
+              className="feature-context-menu-item"
+              onClick={() => void handleContextMenuAction('duplicate')}
+            >
+              Dupliquer cet element
+            </button>
+            <button
+              type="button"
               className="feature-context-menu-item danger"
               onClick={() => void handleContextMenuAction('delete')}
             >
@@ -3876,6 +4924,7 @@ function App() {
             url={BASE_MAPS[baseMapId].url}
             attribution={BASE_MAPS[baseMapId].attribution}
           />
+          <MapViewportCapture onViewportChange={setMapViewport} />
           <MapClickCapture
             enabled={isMapInteractionCaptureEnabled}
             onMapClick={handleMapClick}
@@ -3885,17 +4934,82 @@ function App() {
             onMapMouseDown={handleMapMouseDown}
             onMapMouseUp={handleMapMouseUp}
           />
+          {isGridEnabled
+            ? gridLines.map((line) => (
+                <Polyline
+                  key={line.id}
+                  positions={line.positions}
+                  interactive={false}
+                  pathOptions={{
+                    color: '#334155',
+                    weight: 1,
+                    opacity: 0.24,
+                  }}
+                />
+              ))
+            : null}
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
           {renderDraftGeometry()}
+          {isMeasureMode && measurePoints.length > 0 ? (
+            measureGeometry === 'polygon' ? (
+              measurePoints.length >= 3 ? (
+                <Polygon
+                  positions={measurePoints}
+                  interactive={false}
+                  pathOptions={{
+                    color: '#0284c7',
+                    weight: 3,
+                    dashArray: '6 5',
+                    fillColor: '#38bdf8',
+                    fillOpacity: 0.16,
+                  }}
+                />
+              ) : (
+                <Polyline
+                  positions={measurePoints}
+                  interactive={false}
+                  pathOptions={{
+                    color: '#0284c7',
+                    weight: 3,
+                    dashArray: '6 5',
+                  }}
+                />
+              )
+            ) : (
+              <Polyline
+                positions={measurePoints}
+                interactive={false}
+                pathOptions={{
+                  color: '#0284c7',
+                  weight: 3,
+                  dashArray: '6 5',
+                }}
+              />
+            )
+          ) : null}
           {zoneSelectionBounds ? (
             <Rectangle
               bounds={zoneSelectionBounds}
+              interactive={false}
               pathOptions={{
                 color: '#0f172a',
                 weight: 1.5,
                 dashArray: '5 4',
                 fillColor: '#93c5fd',
                 fillOpacity: 0.16,
+              }}
+            />
+          ) : null}
+          {isSnappingEnabled && snapPreview ? (
+            <CircleMarker
+              center={snapPreview.position}
+              radius={6}
+              interactive={false}
+              pathOptions={{
+                color: snapPreview.type === 'vertex' ? '#0f172a' : '#1d4ed8',
+                fillColor: '#ffffff',
+                fillOpacity: 0.95,
+                weight: 2,
               }}
             />
           ) : null}
