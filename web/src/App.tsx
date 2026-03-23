@@ -10,6 +10,7 @@ import type {
   LatLngTuple,
   LeafletEvent,
   LeafletMouseEvent,
+  Map as LeafletMap,
   Marker as LeafletMarker,
 } from 'leaflet'
 import { DivIcon } from 'leaflet'
@@ -22,6 +23,7 @@ import {
   Popup,
   Rectangle,
   TileLayer,
+  Tooltip,
   useMapEvents,
 } from 'react-leaflet'
 import {
@@ -52,6 +54,7 @@ import './App.css'
 type BaseMapId = 'osm' | 'satellite' | 'carto_light' | 'carto_dark' | 'topo'
 type DrawGeometry = GeometryFeature['geometry']
 type AdminMode = 'view' | 'create' | 'edit' | 'delete'
+type VisibleFeatureSortMode = 'alpha' | 'status' | 'layer' | 'category'
 
 interface BaseMapConfig {
   label: string
@@ -63,6 +66,8 @@ interface VisibleFeature {
   id: string
   name: string
   status: StatusId
+  geometry: DrawGeometry
+  category: string
   layerLabel: string
   color: string
 }
@@ -117,6 +122,8 @@ interface MapViewportCaptureProps {
     zoom: number
     bounds: [LatLngTuple, LatLngTuple]
   }) => void
+  onMapReady?: (map: LeafletMap) => void
+  onCursorMove?: (position: LatLngTuple | null) => void
 }
 
 interface SupabaseKeyMetadata {
@@ -202,6 +209,12 @@ const STATUS_COLORS: Record<StatusId, string> = {
   existant: '#15803d',
   'en cours': '#b45309',
   propose: '#1d4ed8',
+}
+
+const STATUS_SORT_ORDER: Record<StatusId, number> = {
+  existant: 1,
+  'en cours': 2,
+  propose: 3,
 }
 
 const ADMIN_MODE_LABELS: Record<AdminMode, string> = {
@@ -406,7 +419,11 @@ function MapClickCapture({
   return null
 }
 
-function MapViewportCapture({ onViewportChange }: MapViewportCaptureProps) {
+function MapViewportCapture({
+  onViewportChange,
+  onMapReady,
+  onCursorMove,
+}: MapViewportCaptureProps) {
   const map = useMapEvents({
     moveend() {
       const bounds = map.getBounds()
@@ -428,9 +445,16 @@ function MapViewportCapture({ onViewportChange }: MapViewportCaptureProps) {
         ],
       })
     },
+    mousemove(event) {
+      onCursorMove?.([event.latlng.lat, event.latlng.lng])
+    },
+    mouseout() {
+      onCursorMove?.(null)
+    },
   })
 
   useEffect(() => {
+    onMapReady?.(map)
     const bounds = map.getBounds()
     onViewportChange({
       zoom: map.getZoom(),
@@ -439,7 +463,7 @@ function MapViewportCapture({ onViewportChange }: MapViewportCaptureProps) {
         [bounds.getNorth(), bounds.getEast()],
       ],
     })
-  }, [map, onViewportChange])
+  }, [map, onMapReady, onViewportChange])
 
   return null
 }
@@ -741,6 +765,59 @@ function getGridStepForZoom(zoom: number): number {
   return 0.002
 }
 
+function normalizeSearchTerm(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function computeBoundsFromPoints(
+  points: LatLngTuple[],
+): [LatLngTuple, LatLngTuple] | null {
+  if (points.length === 0) {
+    return null
+  }
+  let south = points[0][0]
+  let north = points[0][0]
+  let west = points[0][1]
+  let east = points[0][1]
+  for (let index = 1; index < points.length; index += 1) {
+    const [lat, lng] = points[index]
+    south = Math.min(south, lat)
+    north = Math.max(north, lat)
+    west = Math.min(west, lng)
+    east = Math.max(east, lng)
+  }
+  return [
+    [south, west],
+    [north, east],
+  ]
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function computeFeatureCenter(feature: GeometryFeature): LatLngTuple {
+  if (feature.geometry === 'point') {
+    return feature.position
+  }
+  const points = feature.positions
+  if (points.length === 0) {
+    return MARSEILLE_CENTER
+  }
+  const { lat, lng } = points.reduce(
+    (accumulator, point) => ({
+      lat: accumulator.lat + point[0],
+      lng: accumulator.lng + point[1],
+    }),
+    { lat: 0, lng: 0 },
+  )
+  return [lat / points.length, lng / points.length]
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [dataSource, setDataSource] = useState(layerMeta.mode)
@@ -753,6 +830,15 @@ function App() {
   )
   const [statusFilter, setStatusFilter] = useState<StatusId | 'all'>('all')
   const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
+  const [geometryFilter, setGeometryFilter] = useState<DrawGeometry | 'all'>('all')
+  const [featureSearchQuery, setFeatureSearchQuery] = useState('')
+  const [featureSortMode, setFeatureSortMode] =
+    useState<VisibleFeatureSortMode>('alpha')
+  const [isLabelOverlayEnabled, setIsLabelOverlayEnabled] = useState(false)
+  const [labelMinZoom, setLabelMinZoom] = useState(14)
+  const [pointSizeScale, setPointSizeScale] = useState(1)
+  const [lineWidthScale, setLineWidthScale] = useState(1)
+  const [polygonOpacityScale, setPolygonOpacityScale] = useState(1)
 
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [showDebugInfo, setShowDebugInfo] = useState(false)
@@ -788,6 +874,8 @@ function App() {
     zoom: number
     bounds: [LatLngTuple, LatLngTuple]
   } | null>(null)
+  const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null)
+  const [cursorPosition, setCursorPosition] = useState<LatLngTuple | null>(null)
   const [localHistoryPast, setLocalHistoryPast] = useState<LocalHistoryEntry[]>([])
   const [localHistoryFuture, setLocalHistoryFuture] = useState<LocalHistoryEntry[]>([])
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() =>
@@ -983,33 +1071,83 @@ function App() {
     [layers, activeLayers, categoryFilter],
   )
 
-  const visibleFeatures = useMemo<VisibleFeature[]>(
+  const isFeatureVisibleByFilters = useCallback(
+    (feature: GeometryFeature) => {
+      const matchesStatus =
+        statusFilter === 'all' ? true : feature.status === statusFilter
+      const matchesGeometry =
+        geometryFilter === 'all' ? true : feature.geometry === geometryFilter
+      return matchesStatus && matchesGeometry
+    },
+    [geometryFilter, statusFilter],
+  )
+
+  const visibleFeaturesBase = useMemo<VisibleFeature[]>(
     () =>
       visibleLayers
         .flatMap((layer) =>
           layer.features
-            .filter((feature) =>
-              statusFilter === 'all' ? true : feature.status === statusFilter,
-            )
+            .filter((feature) => isFeatureVisibleByFilters(feature))
             .map((feature) => ({
               id: feature.id,
               name: feature.name,
               status: feature.status,
+              geometry: feature.geometry,
+              category: layer.category,
               layerLabel: layer.label,
               color: feature.color,
             })),
-        )
-        .sort((a, b) => a.name.localeCompare(b.name, 'fr')),
-    [statusFilter, visibleLayers],
+        ),
+    [isFeatureVisibleByFilters, visibleLayers],
   )
 
-  const visibleExportEntries = useMemo<FeatureEnvelope[]>(
+  const visibleFeatures = useMemo<VisibleFeature[]>(() => {
+    const query = normalizeSearchTerm(featureSearchQuery)
+    const filtered =
+      query.length === 0
+        ? visibleFeaturesBase
+        : visibleFeaturesBase.filter((feature) => {
+            const haystack = normalizeSearchTerm(
+              `${feature.name} ${feature.layerLabel} ${feature.category}`,
+            )
+            return haystack.includes(query)
+          })
+
+    return [...filtered].sort((left, right) => {
+      if (featureSortMode === 'status') {
+        const byStatus = STATUS_SORT_ORDER[left.status] - STATUS_SORT_ORDER[right.status]
+        if (byStatus !== 0) {
+          return byStatus
+        }
+        return left.name.localeCompare(right.name, 'fr')
+      }
+      if (featureSortMode === 'layer') {
+        const byLayer = left.layerLabel.localeCompare(right.layerLabel, 'fr')
+        if (byLayer !== 0) {
+          return byLayer
+        }
+        return left.name.localeCompare(right.name, 'fr')
+      }
+      if (featureSortMode === 'category') {
+        const byCategory = left.category.localeCompare(right.category, 'fr')
+        if (byCategory !== 0) {
+          return byCategory
+        }
+        const byLayer = left.layerLabel.localeCompare(right.layerLabel, 'fr')
+        if (byLayer !== 0) {
+          return byLayer
+        }
+        return left.name.localeCompare(right.name, 'fr')
+      }
+      return left.name.localeCompare(right.name, 'fr')
+    })
+  }, [featureSearchQuery, featureSortMode, visibleFeaturesBase])
+
+  const mapVisibleFeatureEntries = useMemo(
     () =>
       visibleLayers.flatMap((layer) =>
         layer.features
-          .filter((feature) =>
-            statusFilter === 'all' ? true : feature.status === statusFilter,
-          )
+          .filter((feature) => isFeatureVisibleByFilters(feature))
           .map((feature) => ({
             feature,
             category: layer.category,
@@ -1017,22 +1155,20 @@ function App() {
             layerLabel: layer.label,
           })),
       ),
-    [statusFilter, visibleLayers],
+    [isFeatureVisibleByFilters, visibleLayers],
+  )
+
+  const visibleExportEntries = useMemo<FeatureEnvelope[]>(
+    () => mapVisibleFeatureEntries,
+    [mapVisibleFeatureEntries],
   )
 
   const visibleStatuses = useMemo(
     () =>
-      Array.from(new Set(visibleFeatures.map((feature) => feature.status))).sort(
-        (a, b) => {
-          const order: Record<StatusId, number> = {
-            existant: 1,
-            'en cours': 2,
-            propose: 3,
-          }
-          return order[a] - order[b]
-        },
+      Array.from(new Set(visibleFeaturesBase.map((feature) => feature.status))).sort(
+        (a, b) => STATUS_SORT_ORDER[a] - STATUS_SORT_ORDER[b],
       ),
-    [visibleFeatures],
+    [visibleFeaturesBase],
   )
 
   const layersByCategory = useMemo(
@@ -1100,34 +1236,33 @@ function App() {
     const vertices: LatLngTuple[] = []
     const segments: SnapSegment[] = []
 
-    for (const layer of visibleLayers) {
-      for (const feature of layer.features) {
-        if (feature.geometry === 'point') {
-          vertices.push(feature.position)
-          continue
-        }
+    for (const entry of mapVisibleFeatureEntries) {
+      const feature = entry.feature
+      if (feature.geometry === 'point') {
+        vertices.push(feature.position)
+        continue
+      }
 
-        const points = feature.positions
-        for (let index = 0; index < points.length; index += 1) {
-          vertices.push(points[index])
-          if (index > 0) {
-            segments.push({
-              start: points[index - 1],
-              end: points[index],
-            })
-          }
-        }
-        if (feature.geometry === 'polygon' && points.length >= 3) {
+      const points = feature.positions
+      for (let index = 0; index < points.length; index += 1) {
+        vertices.push(points[index])
+        if (index > 0) {
           segments.push({
-            start: points[points.length - 1],
-            end: points[0],
+            start: points[index - 1],
+            end: points[index],
           })
         }
+      }
+      if (feature.geometry === 'polygon' && points.length >= 3) {
+        segments.push({
+          start: points[points.length - 1],
+          end: points[0],
+        })
       }
     }
 
     return { vertices, segments }
-  }, [visibleLayers])
+  }, [mapVisibleFeatureEntries])
 
   const findSnapResult = useCallback(
     (rawPosition: LatLngTuple): SnapPreviewState | null => {
@@ -1368,6 +1503,14 @@ function App() {
     }))
   }
 
+  const handleActivateAllLayers = useCallback(() => {
+    setActiveLayers(Object.fromEntries(layers.map((layer) => [layer.id, true])))
+  }, [layers])
+
+  const handleDeactivateAllLayers = useCallback(() => {
+    setActiveLayers(Object.fromEntries(layers.map((layer) => [layer.id, false])))
+  }, [layers])
+
   const focusFeatureById = useCallback(
     (
       featureId: string,
@@ -1402,6 +1545,84 @@ function App() {
       return true
     },
     [featureById, refreshFeatureVersions],
+  )
+
+  const zoomToPoints = useCallback(
+    (points: LatLngTuple[]): boolean => {
+      if (!mapInstance || points.length === 0) {
+        return false
+      }
+      const bounds = computeBoundsFromPoints(points)
+      if (!bounds) {
+        return false
+      }
+      if (points.length === 1) {
+        mapInstance.flyTo(points[0], Math.max(mapInstance.getZoom(), 15), {
+          duration: 0.45,
+        })
+        return true
+      }
+      mapInstance.fitBounds(bounds, {
+        padding: [28, 28],
+        maxZoom: 16,
+      })
+      return true
+    },
+    [mapInstance],
+  )
+
+  const handleCenterOnMarseille = useCallback(() => {
+    if (!mapInstance) {
+      return
+    }
+    mapInstance.flyTo(MARSEILLE_CENTER, 12, { duration: 0.45 })
+  }, [mapInstance])
+
+  const handleFitVisibleFeatures = useCallback(() => {
+    const points = mapVisibleFeatureEntries.flatMap((entry) =>
+      getFeaturePoints(entry.feature),
+    )
+    const didZoom = zoomToPoints(points)
+    if (!didZoom) {
+      setAdminNotice('Aucun element visible a cadrer.')
+    }
+  }, [mapVisibleFeatureEntries, zoomToPoints])
+
+  const handleFitSelection = useCallback(() => {
+    const ids =
+      selectedFeatureIds.length > 0
+        ? selectedFeatureIds
+        : selectedFeatureId
+          ? [selectedFeatureId]
+          : []
+    const points = ids.flatMap((id) => {
+      const match = featureById.get(id)
+      return match ? getFeaturePoints(match.feature) : []
+    })
+    const didZoom = zoomToPoints(points)
+    if (!didZoom) {
+      setAdminNotice('Aucun element selectionne a cadrer.')
+    }
+  }, [featureById, selectedFeatureId, selectedFeatureIds, zoomToPoints])
+
+  const handleVisibleFeatureFocus = useCallback(
+    (featureId: string) => {
+      const match = featureById.get(featureId)
+      if (!match) {
+        return
+      }
+      zoomToPoints(getFeaturePoints(match.feature))
+      if (isAdmin) {
+        const didFocus = focusFeatureById(featureId, 'single')
+        if (didFocus && adminMode !== 'delete') {
+          setAdminMode('edit')
+        }
+      } else {
+        setSelectedFeatureId(featureId)
+        setSelectedFeatureIds([featureId])
+      }
+    },
+    [adminMode, featureById, focusFeatureById, isAdmin, zoomToPoints],
   )
 
   const handleFeatureClick = useCallback(
@@ -3344,9 +3565,7 @@ function App() {
 
   const renderLayerFeatures = (layer: LayerConfig) =>
     layer.features
-      .filter((feature) =>
-        statusFilter === 'all' ? true : feature.status === statusFilter,
-      )
+      .filter((feature) => isFeatureVisibleByFilters(feature))
       .map((feature) => {
         const isSelected = selectedFeatureIdSet.has(feature.id)
         const isFocusedSelection = selectedFeatureId === feature.id
@@ -3396,13 +3615,13 @@ function App() {
             <CircleMarker
               key={feature.id}
               center={feature.position}
-              radius={isSelected ? 9 : 6}
+              radius={clamp((isSelected ? 9 : 6) * pointSizeScale, 4, 20)}
               eventHandlers={eventHandlers}
               pathOptions={{
                 color: isSelected ? '#0f172a' : feature.color,
                 fillColor: feature.color,
                 fillOpacity: isSelected ? 0.95 : 0.85,
-                weight: isSelected ? 3 : 2,
+                weight: clamp((isSelected ? 3 : 2) * lineWidthScale, 1.5, 8),
               }}
             >
               {popup}
@@ -3418,7 +3637,7 @@ function App() {
               eventHandlers={eventHandlers}
               pathOptions={{
                 color: feature.color,
-                weight: isSelected ? 5 : 3,
+                weight: clamp((isSelected ? 5 : 3) * lineWidthScale, 1.5, 10),
                 opacity: 0.9,
               }}
             >
@@ -3434,9 +3653,13 @@ function App() {
             eventHandlers={eventHandlers}
             pathOptions={{
               color: feature.color,
-              weight: isSelected ? 4 : 2,
+              weight: clamp((isSelected ? 4 : 2) * lineWidthScale, 1.5, 8),
               fillColor: feature.color,
-              fillOpacity: isSelected ? 0.35 : 0.2,
+              fillOpacity: clamp(
+                (isSelected ? 0.35 : 0.2) * polygonOpacityScale,
+                0.05,
+                0.9,
+              ),
             }}
           >
             {popup}
@@ -3501,6 +3724,25 @@ function App() {
     adminMode === 'create' ? 'Creation en cours' : 'Redessin en cours'
   const canLocalUndo = localHistoryPast.length > 0
   const canLocalRedo = localHistoryFuture.length > 0
+  const currentMapZoom = mapViewport?.zoom ?? 0
+  const isLabelOverlayActive =
+    isLabelOverlayEnabled && currentMapZoom >= labelMinZoom
+  const mapLabelEntries = useMemo(() => {
+    if (!isLabelOverlayActive) {
+      return [] as Array<{
+        id: string
+        name: string
+        color: string
+        position: LatLngTuple
+      }>
+    }
+    return mapVisibleFeatureEntries.map((entry) => ({
+      id: entry.feature.id,
+      name: entry.feature.name,
+      color: entry.feature.color,
+      position: computeFeatureCenter(entry.feature),
+    }))
+  }, [isLabelOverlayActive, mapVisibleFeatureEntries])
 
   return (
     <div className="app-shell">
@@ -4312,11 +4554,79 @@ function App() {
                 ))}
               </select>
             </label>
+
+            <label>
+              Geometrie
+              <select
+                value={geometryFilter}
+                onChange={(event) =>
+                  setGeometryFilter(event.target.value as DrawGeometry | 'all')
+                }
+              >
+                <option value="all">Toutes</option>
+                <option value="point">Points</option>
+                <option value="line">Lignes</option>
+                <option value="polygon">Polygones</option>
+              </select>
+            </label>
           </div>
         </section>
 
         <section className="panel-block">
+          <h2>Navigation carte</h2>
+          <div className="admin-actions-row">
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleCenterOnMarseille}
+            >
+              Recentrer Marseille
+            </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleFitVisibleFeatures}
+              disabled={mapVisibleFeatureEntries.length === 0}
+            >
+              Cadrer visibles
+            </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleFitSelection}
+              disabled={
+                selectedFeatureIds.length === 0 && selectedFeatureId === null
+              }
+            >
+              Cadrer selection
+            </button>
+          </div>
+          <p className="muted">
+            Curseur:{' '}
+            {cursorPosition
+              ? `${cursorPosition[0].toFixed(5)}, ${cursorPosition[1].toFixed(5)}`
+              : 'survole la carte'}
+          </p>
+        </section>
+
+        <section className="panel-block">
           <h2>Calques</h2>
+          <div className="admin-actions-row">
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleActivateAllLayers}
+            >
+              Tout activer
+            </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleDeactivateAllLayers}
+            >
+              Tout desactiver
+            </button>
+          </div>
           {layersByCategory.map((block) => (
             <div key={block.category} className="layer-group">
               <h3>{block.category}</h3>
@@ -4381,24 +4691,68 @@ function App() {
         </section>
 
         <section className="panel-block visible-list-block">
-          <h2>Elements visibles ({visibleFeatures.length})</h2>
+          <h2>Elements visibles ({mapVisibleFeatureEntries.length})</h2>
+          <div className="filters-grid">
+            <label>
+              Recherche rapide
+              <input
+                type="text"
+                value={featureSearchQuery}
+                onChange={(event) => setFeatureSearchQuery(event.target.value)}
+                placeholder="Nom, calque, categorie..."
+              />
+            </label>
+            <label>
+              Tri
+              <select
+                value={featureSortMode}
+                onChange={(event) =>
+                  setFeatureSortMode(event.target.value as VisibleFeatureSortMode)
+                }
+              >
+                <option value="alpha">Alphabetique</option>
+                <option value="status">Par statut</option>
+                <option value="layer">Par calque</option>
+                <option value="category">Par categorie</option>
+              </select>
+            </label>
+          </div>
+          <p className="muted">
+            {visibleFeatures.length} resultat(s)
+            {featureSearchQuery.trim()
+              ? ` pour "${featureSearchQuery.trim()}"`
+              : ''}
+          </p>
           {visibleFeatures.length === 0 ? (
-            <p className="muted">Active un calque pour commencer.</p>
+            <p className="muted">
+              {mapVisibleFeatureEntries.length === 0
+                ? 'Active un calque pour commencer.'
+                : 'Aucun element ne correspond a la recherche.'}
+            </p>
           ) : (
             <ul className="feature-list">
               {visibleFeatures.map((feature) => (
                 <li key={feature.id}>
-                  <span
-                    className="legend-dot"
-                    style={{ backgroundColor: feature.color }}
-                    aria-hidden="true"
-                  />
-                  <div>
-                    <strong>{feature.name}</strong>
-                    <p>
-                      {feature.layerLabel} | {STATUS_LABELS[feature.status]}
-                    </p>
-                  </div>
+                  <button
+                    type="button"
+                    className="feature-list-item-button"
+                    onClick={() => handleVisibleFeatureFocus(feature.id)}
+                    title="Zoomer sur cet element"
+                  >
+                    <span
+                      className="legend-dot"
+                      style={{ backgroundColor: feature.color }}
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <strong>{feature.name}</strong>
+                      <p>
+                        {feature.layerLabel} | {feature.category} |{' '}
+                        {STATUS_LABELS[feature.status]} |{' '}
+                        {DRAW_GEOMETRY_LABELS[feature.geometry]}
+                      </p>
+                    </div>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -4721,6 +5075,14 @@ function App() {
                 >
                   {isGridEnabled ? 'Grille ON' : 'Grille'}
                 </button>
+                <button
+                  type="button"
+                  className={`ghost-button mini-button${isLabelOverlayEnabled ? ' active' : ''}`}
+                  onClick={() => setIsLabelOverlayEnabled((current) => !current)}
+                  title="Etiquettes de carte"
+                >
+                  {isLabelOverlayEnabled ? 'Labels ON' : 'Labels'}
+                </button>
               </div>
 
               <label className="map-toolbar-label small">
@@ -4728,12 +5090,79 @@ function App() {
                 <input
                   type="range"
                   min={5}
-                  max={80}
-                  step={1}
+                  max={500}
+                  step={5}
                   className="map-toolbar-range"
                   value={snapToleranceMeters}
                   onChange={(event) =>
                     setSnapToleranceMeters(Number.parseInt(event.target.value, 10))
+                  }
+                />
+              </label>
+              <p className="map-toolbar-meta">
+                Candidats snap: {snapCandidates.vertices.length} sommets,{' '}
+                {snapCandidates.segments.length} segments
+              </p>
+
+              {isLabelOverlayEnabled ? (
+                <label className="map-toolbar-label small">
+                  Labels a partir du zoom {labelMinZoom}
+                  <input
+                    type="range"
+                    min={10}
+                    max={18}
+                    step={1}
+                    className="map-toolbar-range"
+                    value={labelMinZoom}
+                    onChange={(event) =>
+                      setLabelMinZoom(Number.parseInt(event.target.value, 10))
+                    }
+                  />
+                </label>
+              ) : null}
+
+              <p className="map-toolbar-meta">
+                <strong>Style global</strong>
+              </p>
+              <label className="map-toolbar-label small">
+                Taille des points: {pointSizeScale.toFixed(2)}x
+                <input
+                  type="range"
+                  min={0.7}
+                  max={2}
+                  step={0.05}
+                  className="map-toolbar-range"
+                  value={pointSizeScale}
+                  onChange={(event) =>
+                    setPointSizeScale(Number.parseFloat(event.target.value))
+                  }
+                />
+              </label>
+              <label className="map-toolbar-label small">
+                Epaisseur lignes: {lineWidthScale.toFixed(2)}x
+                <input
+                  type="range"
+                  min={0.7}
+                  max={2.5}
+                  step={0.05}
+                  className="map-toolbar-range"
+                  value={lineWidthScale}
+                  onChange={(event) =>
+                    setLineWidthScale(Number.parseFloat(event.target.value))
+                  }
+                />
+              </label>
+              <label className="map-toolbar-label small">
+                Opacite surfaces: {polygonOpacityScale.toFixed(2)}x
+                <input
+                  type="range"
+                  min={0.4}
+                  max={2}
+                  step={0.05}
+                  className="map-toolbar-range"
+                  value={polygonOpacityScale}
+                  onChange={(event) =>
+                    setPolygonOpacityScale(Number.parseFloat(event.target.value))
                   }
                 />
               </label>
@@ -4836,6 +5265,14 @@ function App() {
             </div>
           </div>
         ) : null}
+        <div className="map-cursor-hud" aria-live="polite">
+          <span>Zoom {currentMapZoom.toFixed(1)}</span>
+          <span>
+            {cursorPosition
+              ? `${cursorPosition[0].toFixed(5)}, ${cursorPosition[1].toFixed(5)}`
+              : 'Survole pour lire les coordonnees'}
+          </span>
+        </div>
         {isAdmin && isGuidedDrawing && guideGeometry ? (
           <div className="map-drawing-hud" role="status" aria-live="polite">
             <p className="map-drawing-hud-title">{drawingGuideTitle}</p>
@@ -4924,7 +5361,11 @@ function App() {
             url={BASE_MAPS[baseMapId].url}
             attribution={BASE_MAPS[baseMapId].attribution}
           />
-          <MapViewportCapture onViewportChange={setMapViewport} />
+          <MapViewportCapture
+            onViewportChange={setMapViewport}
+            onMapReady={setMapInstance}
+            onCursorMove={setCursorPosition}
+          />
           <MapClickCapture
             enabled={isMapInteractionCaptureEnabled}
             onMapClick={handleMapClick}
@@ -4949,6 +5390,35 @@ function App() {
               ))
             : null}
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
+          {mapLabelEntries.map((entry) => (
+            <CircleMarker
+              key={`label-${entry.id}`}
+              center={entry.position}
+              radius={1}
+              interactive={false}
+              pathOptions={{
+                opacity: 0,
+                fillOpacity: 0,
+                stroke: false,
+              }}
+            >
+              <Tooltip
+                permanent
+                direction="top"
+                offset={[0, -4]}
+                className="feature-inline-label"
+              >
+                <span
+                  className="feature-inline-label-text"
+                  style={{
+                    borderColor: entry.color,
+                  }}
+                >
+                  {entry.name}
+                </span>
+              </Tooltip>
+            </CircleMarker>
+          ))}
           {renderDraftGeometry()}
           {isMeasureMode && measurePoints.length > 0 ? (
             measureGeometry === 'polygon' ? (
