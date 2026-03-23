@@ -172,6 +172,24 @@ const MIN_POINTS_REQUIRED: Record<DrawGeometry, number> = {
   polygon: 3,
 }
 
+const MAP_TOOLBAR_TOOLS: ReadonlyArray<{
+  id: string
+  label: string
+  mode: AdminMode
+  geometry?: DrawGeometry
+}> = [
+  { id: 'tool-create-point', label: 'Point', mode: 'create', geometry: 'point' },
+  { id: 'tool-create-line', label: 'Ligne', mode: 'create', geometry: 'line' },
+  {
+    id: 'tool-create-polygon',
+    label: 'Polygone',
+    mode: 'create',
+    geometry: 'polygon',
+  },
+  { id: 'tool-edit', label: 'Deplacer', mode: 'edit' },
+  { id: 'tool-delete', label: 'Supprimer', mode: 'delete' },
+]
+
 function extractProjectRefFromUrl(value: string | undefined): string | null {
   if (!value) {
     return null
@@ -763,6 +781,37 @@ function App() {
       }
     },
     [adminMode, createDraft.geometry, editDraft, isAdmin, isRedrawingEditGeometry],
+  )
+
+  const handleToolbarToolClick = useCallback(
+    (mode: AdminMode, geometry?: DrawGeometry) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+
+      if (mode === 'create' && geometry) {
+        setAdminMode('create')
+        setCreateDraft((current) => ({
+          ...current,
+          geometry,
+        }))
+        setCreatePoints([])
+        setIsRedrawingEditGeometry(false)
+        return
+      }
+
+      if (mode === 'edit') {
+        setAdminMode('edit')
+        setIsRedrawingEditGeometry(false)
+        return
+      }
+
+      if (mode === 'delete') {
+        setAdminMode('delete')
+      }
+    },
+    [isAdmin],
   )
 
   const handleAdminLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -2434,6 +2483,37 @@ function App() {
       </aside>
 
       <main className="map-pane">
+        {isAdmin ? (
+          <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
+            <p className="map-toolbar-title">Outils carte</p>
+            <div className="map-toolbar-buttons">
+              {MAP_TOOLBAR_TOOLS.map((tool) => {
+                const isActive =
+                  adminMode === tool.mode &&
+                  (tool.mode !== 'create' || createDraft.geometry === tool.geometry)
+
+                return (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    className={`map-tool-button${isActive ? ' active' : ''}`}
+                    onClick={() => handleToolbarToolClick(tool.mode, tool.geometry)}
+                    aria-pressed={isActive}
+                    title={tool.label}
+                  >
+                    {tool.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="map-toolbar-hint">
+              Mode actif:{' '}
+              {adminMode === 'create'
+                ? `Creation ${createDraft.geometry}`
+                : ADMIN_MODE_LABELS[adminMode]}
+            </p>
+          </div>
+        ) : null}
         <MapContainer
           center={MARSEILLE_CENTER}
           zoom={12}
