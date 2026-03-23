@@ -59,6 +59,20 @@ interface PersistLayerOrderInput {
   sortOrder: number
 }
 
+function normalizeAdminError(message: string): string {
+  const normalized = message.toLowerCase()
+
+  if (
+    (normalized.includes('column') && normalized.includes('does not exist')) ||
+    (normalized.includes('relation') && normalized.includes('does not exist')) ||
+    normalized.includes('map_feature_versions')
+  ) {
+    return 'Schema Supabase incomplet. Execute web/supabase/schema.sql dans SQL Editor.'
+  }
+
+  return message
+}
+
 function isStatus(value: unknown): value is StatusId {
   return value === 'existant' || value === 'en cours' || value === 'propose'
 }
@@ -141,7 +155,7 @@ export async function fetchTrashFromSupabase(): Promise<Result<TrashFeature[]>> 
     .limit(250)
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: normalizeAdminError(error.message) }
   }
 
   const rows = (data || []) as TrashFeatureRow[]
@@ -169,7 +183,7 @@ export async function moveFeatureToTrash(featureId: string): Promise<Result<null
     .eq('id', featureId)
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: normalizeAdminError(error.message) }
   }
 
   return { ok: true, data: null }
@@ -191,7 +205,7 @@ export async function restoreFeatureFromTrash(
     .eq('id', featureId)
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: normalizeAdminError(error.message) }
   }
 
   return { ok: true, data: null }
@@ -212,7 +226,7 @@ export async function fetchFeatureVersions(
     .limit(20)
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: normalizeAdminError(error.message) }
   }
 
   const items = ((data || []) as VersionRow[]).map((row) => ({
@@ -239,7 +253,7 @@ export async function restorePreviousFeatureVersion(
     .limit(30)
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: normalizeAdminError(error.message) }
   }
 
   const rows = (data || []) as VersionRow[]
@@ -272,7 +286,7 @@ export async function restorePreviousFeatureVersion(
     .eq('id', featureId)
 
   if (updateError) {
-    return { ok: false, error: updateError.message }
+    return { ok: false, error: normalizeAdminError(updateError.message) }
   }
 
   return { ok: true, data: null }
@@ -293,7 +307,7 @@ export async function persistLayerSortOrder(
       .eq('layer_id', update.layerId)
 
     if (error) {
-      return { ok: false, error: error.message }
+      return { ok: false, error: normalizeAdminError(error.message) }
     }
   }
 

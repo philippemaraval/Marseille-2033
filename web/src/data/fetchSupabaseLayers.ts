@@ -103,12 +103,22 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
   return null
 }
 
-export async function fetchLayersFromSupabase(): Promise<FetchResult> {
-  if (!hasSupabase || !supabase) {
-    return {
-      ok: false,
-      error: 'Supabase non configure (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).',
-    }
+function isMissingSchemaError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('column') && normalized.includes('does not exist')
+  )
+}
+
+async function fetchRowsWithCurrentSchema(): Promise<{
+  ok: true
+  rows: MapFeatureRow[]
+} | {
+  ok: false
+  error: string
+}> {
+  if (!supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
   }
 
   const pageSize = 1000
@@ -141,6 +151,80 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
     }
 
     offset += pageSize
+  }
+
+  return { ok: true, rows }
+}
+
+async function fetchRowsWithLegacySchema(): Promise<{
+  ok: true
+  rows: MapFeatureRow[]
+} | {
+  ok: false
+  error: string
+}> {
+  if (!supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const pageSize = 1000
+  let offset = 0
+  const rows: MapFeatureRow[] = []
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from('map_features')
+      .select(
+        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order',
+      )
+      .order('category')
+      .order('layer_label')
+      .order('sort_order')
+      .order('name')
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      return { ok: false, error: error.message }
+    }
+
+    const pageRows = (data || []).map((row) => ({
+      ...row,
+      layer_sort_order: 0,
+    })) as MapFeatureRow[]
+
+    rows.push(...pageRows)
+
+    if (pageRows.length < pageSize) {
+      break
+    }
+
+    offset += pageSize
+  }
+
+  return { ok: true, rows }
+}
+
+export async function fetchLayersFromSupabase(): Promise<FetchResult> {
+  if (!hasSupabase || !supabase) {
+    return {
+      ok: false,
+      error: 'Supabase non configure (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).',
+    }
+  }
+
+  const currentSchemaResult = await fetchRowsWithCurrentSchema()
+  let rows: MapFeatureRow[] = []
+
+  if (currentSchemaResult.ok) {
+    rows = currentSchemaResult.rows
+  } else if (isMissingSchemaError(currentSchemaResult.error)) {
+    const legacySchemaResult = await fetchRowsWithLegacySchema()
+    if (!legacySchemaResult.ok) {
+      return { ok: false, error: legacySchemaResult.error }
+    }
+    rows = legacySchemaResult.rows
+  } else {
+    return { ok: false, error: currentSchemaResult.error }
   }
 
   const layerMap = new Map<string, LayerConfig>()
