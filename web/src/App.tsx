@@ -219,6 +219,13 @@ interface ViewBookmark {
   createdAt: number
 }
 
+interface LayerVisibilityPreset {
+  id: string
+  name: string
+  layerIds: string[]
+  createdAt: number
+}
+
 interface StyleTemplateOption {
   id: string
   label: string
@@ -266,8 +273,13 @@ interface PersistedUiStateV1 {
     { minZoom: number; maxZoom: number }
   >
   layerOpacityByKey?: Record<string, number>
+  layerPanelSearchQuery?: string
+  layerPresetDraftName?: string
+  layerVisibilityPresets?: LayerVisibilityPreset[]
   viewBookmarks?: ViewBookmark[]
   isNorthArrowVisible?: boolean
+  isPresentationMode?: boolean
+  showWelcomeHint?: boolean
   mapView?: {
     center: LatLngTuple
     zoom: number
@@ -389,6 +401,7 @@ const DEFAULT_POLYGON_PATTERN: PolygonPattern = 'none'
 const DEFAULT_POLYGON_BORDER_MODE: PolygonBorderMode = 'normal'
 const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 const MAX_VIEW_BOOKMARKS = 30
+const MAX_LAYER_PRESETS = 30
 
 const POINT_ICON_LABELS: Record<PointIconId, string> = {
   dot: 'Rond',
@@ -1350,6 +1363,41 @@ function parseViewBookmarks(value: unknown): ViewBookmark[] {
   return items.slice(0, MAX_VIEW_BOOKMARKS)
 }
 
+function parseLayerVisibilityPresets(value: unknown): LayerVisibilityPreset[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const items: LayerVisibilityPreset[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) {
+      continue
+    }
+    const layerIds = parseStringArray(item.layerIds)
+    if (layerIds.length === 0) {
+      continue
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim().length > 0
+        ? item.id
+        : `layer_preset_${crypto.randomUUID()}`
+    const name =
+      typeof item.name === 'string' && item.name.trim().length > 0
+        ? item.name.trim()
+        : `Preset ${items.length + 1}`
+    const createdAt =
+      typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+        ? item.createdAt
+        : Date.now()
+    items.push({
+      id,
+      name,
+      layerIds,
+      createdAt,
+    })
+  }
+  return items.slice(0, MAX_LAYER_PRESETS)
+}
+
 function parseLayerZoomVisibility(
   value: unknown,
 ): Record<string, { minZoom: number; maxZoom: number }> {
@@ -2122,6 +2170,11 @@ function App() {
   const [searchFocusPoint, setSearchFocusPoint] = useState<LatLngTuple | null>(null)
   const [bookmarkDraftName, setBookmarkDraftName] = useState('')
   const [viewBookmarks, setViewBookmarks] = useState<ViewBookmark[]>([])
+  const [layerPanelSearchQuery, setLayerPanelSearchQuery] = useState('')
+  const [layerPresetDraftName, setLayerPresetDraftName] = useState('')
+  const [layerVisibilityPresets, setLayerVisibilityPresets] = useState<
+    LayerVisibilityPreset[]
+  >([])
 
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [showDebugInfo, setShowDebugInfo] = useState(false)
@@ -2160,6 +2213,8 @@ function App() {
   const [isGridEnabled, setIsGridEnabled] = useState(false)
   const [isNorthArrowVisible, setIsNorthArrowVisible] = useState(true)
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
+  const [isPresentationMode, setIsPresentationMode] = useState(false)
+  const [showWelcomeHint, setShowWelcomeHint] = useState(true)
   const [mapViewport, setMapViewport] = useState<{
     center: LatLngTuple
     zoom: number
@@ -2358,6 +2413,26 @@ function App() {
   }, [isAdmin])
 
   useEffect(() => {
+    if (isPresentationMode) {
+      setIsShortcutHelpOpen(false)
+    }
+  }, [isPresentationMode])
+
+  useEffect(() => {
+    if (!isPresentationMode) {
+      return
+    }
+    setAdminMode('view')
+    setIsMeasureMode(false)
+    setIsZoneSelectionMode(false)
+    setIsZoneSelectionDragging(false)
+    setZoneSelectionStart(null)
+    setZoneSelectionCurrent(null)
+    setFeatureContextMenu(null)
+    setSnapPreview(null)
+  }, [isPresentationMode])
+
+  useEffect(() => {
     if (hasHydratedUiStateRef.current || typeof window === 'undefined') {
       return
     }
@@ -2404,6 +2479,17 @@ function App() {
       }
       if (persisted.viewBookmarks !== undefined) {
         setViewBookmarks(parseViewBookmarks(persisted.viewBookmarks))
+      }
+      if (typeof persisted.layerPanelSearchQuery === 'string') {
+        setLayerPanelSearchQuery(persisted.layerPanelSearchQuery)
+      }
+      if (typeof persisted.layerPresetDraftName === 'string') {
+        setLayerPresetDraftName(persisted.layerPresetDraftName)
+      }
+      if (persisted.layerVisibilityPresets !== undefined) {
+        setLayerVisibilityPresets(
+          parseLayerVisibilityPresets(persisted.layerVisibilityPresets),
+        )
       }
 
       const persistedStatusFilter = persisted.statusFilter
@@ -2543,6 +2629,14 @@ function App() {
       if (persistedNorthArrow !== null) {
         setIsNorthArrowVisible(persistedNorthArrow)
       }
+      const persistedPresentationMode = parseBooleanValue(persisted.isPresentationMode)
+      if (persistedPresentationMode !== null) {
+        setIsPresentationMode(persistedPresentationMode)
+      }
+      const persistedShowWelcomeHint = parseBooleanValue(persisted.showWelcomeHint)
+      if (persistedShowWelcomeHint !== null) {
+        setShowWelcomeHint(persistedShowWelcomeHint)
+      }
 
       if (persisted.localHistoryPast !== undefined) {
         setLocalHistoryPast(parseLocalHistoryEntries(persisted.localHistoryPast))
@@ -2670,8 +2764,13 @@ function App() {
       collapsedLayerFolders,
       layerZoomVisibility,
       layerOpacityByKey,
+      layerPanelSearchQuery,
+      layerPresetDraftName,
+      layerVisibilityPresets,
       viewBookmarks,
       isNorthArrowVisible,
+      isPresentationMode,
+      showWelcomeHint,
       mapView: mapView ?? null,
     }
 
@@ -2701,10 +2800,14 @@ function App() {
     isLabelCollisionEnabled,
     isMeasureMode,
     isNorthArrowVisible,
+    isPresentationMode,
     isRedrawingEditGeometry,
     isSnappingEnabled,
     labelMinZoom,
+    layerPanelSearchQuery,
+    layerPresetDraftName,
     layerOpacityByKey,
+    layerVisibilityPresets,
     layerZoomVisibility,
     lockedLayers,
     localHistoryFuture,
@@ -2715,6 +2818,7 @@ function App() {
     selectedFeatureId,
     selectedFeatureIds,
     showDebugInfo,
+    showWelcomeHint,
     snapToleranceMeters,
     statusFilter,
     viewBookmarks,
@@ -2850,13 +2954,56 @@ function App() {
     [visibleFeaturesBase],
   )
 
+  const statusQuickCounts = useMemo(() => {
+    const counts: Record<StatusId | 'all', number> = {
+      all: 0,
+      existant: 0,
+      'en cours': 0,
+      propose: 0,
+    }
+    for (const layer of visibleLayers) {
+      for (const feature of layer.features) {
+        if (geometryFilter !== 'all' && feature.geometry !== geometryFilter) {
+          continue
+        }
+        counts.all += 1
+        counts[feature.status] += 1
+      }
+    }
+    return counts
+  }, [geometryFilter, visibleLayers])
+
+  const layerVisibleCountById = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const layer of layers) {
+      counts.set(
+        layer.id,
+        layer.features.filter((feature) => isFeatureVisibleByFilters(feature)).length,
+      )
+    }
+    return counts
+  }, [isFeatureVisibleByFilters, layers])
+
+  const normalizedLayerPanelSearchQuery = normalizeSearchTerm(layerPanelSearchQuery)
+
   const layersByCategory = useMemo(
     () =>
-      categories.map((category) => ({
-        category,
-        layers: layers.filter((layer) => layer.category === category),
-      })),
-    [categories, layers],
+      categories
+        .map((category) => ({
+          category,
+          layers: layers.filter((layer) => {
+            if (layer.category !== category) {
+              return false
+            }
+            if (normalizedLayerPanelSearchQuery.length === 0) {
+              return true
+            }
+            const haystack = normalizeSearchTerm(`${layer.label} ${layer.category}`)
+            return haystack.includes(normalizedLayerPanelSearchQuery)
+          }),
+        }))
+        .filter((block) => block.layers.length > 0),
+    [categories, layers, normalizedLayerPanelSearchQuery],
   )
 
   const styleTemplates = useMemo<StyleTemplateOption[]>(() => {
@@ -3439,6 +3586,88 @@ function App() {
     },
     [layers],
   )
+
+  const handleFitLayer = useCallback(
+    (category: string, layerId: string) => {
+      const layer = layers.find(
+        (candidate) => candidate.id === layerId && candidate.category === category,
+      )
+      if (!layer) {
+        setAdminNotice('Calque introuvable.')
+        return
+      }
+      const points = layer.features.flatMap((feature) => getFeaturePoints(feature))
+      if (!mapInstance || points.length === 0) {
+        setAdminNotice('Aucun element a cadrer sur ce calque.')
+        return
+      }
+      const bounds = computeBoundsFromPoints(points)
+      if (!bounds) {
+        setAdminNotice('Aucun element a cadrer sur ce calque.')
+        return
+      }
+      if (points.length === 1) {
+        mapInstance.flyTo(points[0], Math.max(mapInstance.getZoom(), 15), {
+          duration: 0.45,
+        })
+        return
+      }
+      mapInstance.fitBounds(bounds, {
+        padding: [28, 28],
+        maxZoom: 16,
+      })
+    },
+    [layers, mapInstance],
+  )
+
+  const handleSaveLayerVisibilityPreset = useCallback(() => {
+    const activeIds = Object.entries(activeLayers)
+      .filter(([, isActive]) => isActive)
+      .map(([layerId]) => layerId)
+    if (activeIds.length === 0) {
+      setAdminNotice('Active au moins un calque pour enregistrer un preset.')
+      return
+    }
+    const trimmedName = layerPresetDraftName.trim()
+    const generatedName = `Preset ${new Date().toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`
+    const preset: LayerVisibilityPreset = {
+      id: `layer_preset_${crypto.randomUUID()}`,
+      name: trimmedName || generatedName,
+      layerIds: activeIds,
+      createdAt: Date.now(),
+    }
+    setLayerVisibilityPresets((current) =>
+      [preset, ...current].slice(0, MAX_LAYER_PRESETS),
+    )
+    setLayerPresetDraftName('')
+    setAdminNotice('Preset de calques enregistre.')
+  }, [activeLayers, layerPresetDraftName])
+
+  const handleApplyLayerVisibilityPreset = useCallback(
+    (presetId: string) => {
+      const preset = layerVisibilityPresets.find((item) => item.id === presetId)
+      if (!preset) {
+        setAdminNotice('Preset introuvable.')
+        return
+      }
+      const validLayerIds = new Set(layers.map((layer) => layer.id))
+      const activeSet = new Set(preset.layerIds.filter((layerId) => validLayerIds.has(layerId)))
+      setActiveLayers(
+        Object.fromEntries(layers.map((layer) => [layer.id, activeSet.has(layer.id)])),
+      )
+      setAdminNotice(`Preset applique: ${preset.name}.`)
+    },
+    [layerVisibilityPresets, layers],
+  )
+
+  const handleDeleteLayerVisibilityPreset = useCallback((presetId: string) => {
+    setLayerVisibilityPresets((current) =>
+      current.filter((item) => item.id !== presetId),
+    )
+  }, [])
 
   const focusFeatureById = useCallback(
     (
@@ -5901,6 +6130,11 @@ function App() {
         setIsShortcutHelpOpen((current) => !current)
         return
       }
+      if (key === 'p') {
+        event.preventDefault()
+        setIsPresentationMode((current) => !current)
+        return
+      }
       if (key === '1') {
         event.preventDefault()
         handleToolbarToolClick('create', 'point')
@@ -6029,6 +6263,11 @@ function App() {
           setSnapPreview(null)
           return
         }
+        if (isPresentationMode) {
+          event.preventDefault()
+          setIsPresentationMode(false)
+          return
+        }
         if (adminMode !== 'view') {
           event.preventDefault()
           setAdminMode('view')
@@ -6058,6 +6297,7 @@ function App() {
     handleLocalUndo,
     isAdmin,
     isMeasureMode,
+    isPresentationMode,
     isRedrawingEditGeometry,
     isShortcutHelpOpen,
     isZoneSelectionMode,
@@ -6749,8 +6989,9 @@ function App() {
   }, [mapViewport])
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell${isPresentationMode ? ' presentation-mode' : ''}`}>
+      {!isPresentationMode ? (
+        <aside className="sidebar">
         <header className="sidebar-header">
           <div className="title-row">
             <div>
@@ -7788,6 +8029,36 @@ function App() {
               </select>
             </label>
           </div>
+          <div className="status-chip-grid">
+            <button
+              type="button"
+              className={`ghost-button mini-button${statusFilter === 'all' ? ' active' : ''}`}
+              onClick={() => setStatusFilter('all')}
+            >
+              Tous ({statusQuickCounts.all})
+            </button>
+            <button
+              type="button"
+              className={`ghost-button mini-button${statusFilter === 'existant' ? ' active' : ''}`}
+              onClick={() => setStatusFilter('existant')}
+            >
+              Existant ({statusQuickCounts.existant})
+            </button>
+            <button
+              type="button"
+              className={`ghost-button mini-button${statusFilter === 'en cours' ? ' active' : ''}`}
+              onClick={() => setStatusFilter('en cours')}
+            >
+              En cours ({statusQuickCounts['en cours']})
+            </button>
+            <button
+              type="button"
+              className={`ghost-button mini-button${statusFilter === 'propose' ? ' active' : ''}`}
+              onClick={() => setStatusFilter('propose')}
+            >
+              Propose ({statusQuickCounts.propose})
+            </button>
+          </div>
         </section>
 
         <section className="panel-block">
@@ -7965,6 +8236,66 @@ function App() {
               Replier categories
             </button>
           </div>
+          <div className="layer-preset-tools">
+            <label>
+              Recherche calque
+              <input
+                type="text"
+                value={layerPanelSearchQuery}
+                onChange={(event) => setLayerPanelSearchQuery(event.target.value)}
+                placeholder="Nom de calque ou categorie..."
+              />
+            </label>
+            <label>
+              Nom du preset
+              <input
+                type="text"
+                value={layerPresetDraftName}
+                onChange={(event) => setLayerPresetDraftName(event.target.value)}
+                placeholder="Ex: transports + parcs"
+              />
+            </label>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleSaveLayerVisibilityPreset}
+            >
+              Enregistrer preset
+            </button>
+          </div>
+          {layerVisibilityPresets.length > 0 ? (
+            <ul className="layer-preset-list">
+              {layerVisibilityPresets.map((preset) => (
+                <li key={preset.id}>
+                  <div>
+                    <strong>{preset.name}</strong>
+                    <p>{preset.layerIds.length} calque(s)</p>
+                  </div>
+                  <div className="layer-order-actions">
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={() => handleApplyLayerVisibilityPreset(preset.id)}
+                    >
+                      Appliquer
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={() => handleDeleteLayerVisibilityPreset(preset.id)}
+                    >
+                      Suppr.
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">Aucun preset de calques.</p>
+          )}
+          {layersByCategory.length === 0 ? (
+            <p className="muted">Aucun calque ne correspond a ta recherche.</p>
+          ) : null}
           {layersByCategory.map((block) => (
             <div key={block.category} className="layer-group">
               <button
@@ -8008,6 +8339,10 @@ function App() {
                             {layerLocked ? ' (verrouille)' : ''}
                           </span>
                         </label>
+                        <p className="layer-row-meta">
+                          {layerVisibleCountById.get(layer.id) ?? 0}/{layer.features.length}{' '}
+                          element(s) avec filtres
+                        </p>
                         {isAdmin ? (
                           <div className="layer-order-actions">
                             <button
@@ -8017,6 +8352,14 @@ function App() {
                               title="Activer uniquement ce calque"
                             >
                               Solo
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() => handleFitLayer(block.category, layer.id)}
+                              title="Cadrer ce calque"
+                            >
+                              Zoom
                             </button>
                             <button
                               type="button"
@@ -8234,12 +8577,49 @@ function App() {
             </ul>
           )}
         </section>
-      </aside>
+        </aside>
+      ) : null}
 
       <main
         className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isAdmin && isZoneSelectionMode ? ' is-zone-selecting' : ''}${isAdmin && isMeasureMode ? ' is-measuring' : ''}`}
       >
-        {isAdmin ? (
+        <div className="map-floating-actions">
+          <button
+            type="button"
+            className="ghost-button mini-button"
+            onClick={() => setIsPresentationMode((current) => !current)}
+          >
+            {isPresentationMode ? 'Quitter presentation' : 'Mode presentation'}
+          </button>
+          {!showWelcomeHint ? (
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={() => setShowWelcomeHint(true)}
+            >
+              Astuces
+            </button>
+          ) : null}
+        </div>
+        {showWelcomeHint && !isPresentationMode ? (
+          <div className="map-welcome-hint" role="status" aria-live="polite">
+            <p className="map-welcome-title">Astuces rapides</p>
+            <p className="map-welcome-text">
+              Active des calques, clique un element pour le focus, puis utilise "Copier lien"
+              pour partager exactement cette vue.
+            </p>
+            <div className="map-welcome-actions">
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={() => setShowWelcomeHint(false)}
+              >
+                Masquer
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {isAdmin && !isPresentationMode ? (
           <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
             <p className="map-toolbar-title">Outils carte</p>
             <div className="map-toolbar-buttons">
@@ -8272,7 +8652,7 @@ function App() {
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
             <p className="map-toolbar-shortcuts">
-              Raccourcis: 1/2/3, E, D, R, Z, M, G, X, ?, Shift+clic, Entrer, Retour, Esc, Ctrl/Cmd+Z/Y
+              Raccourcis: 1/2/3, E, D, R, Z, M, G, X, P, ?, Shift+clic, Entrer, Retour, Esc, Ctrl/Cmd+Z/Y
             </p>
             <div className="map-toolbar-actions map-toolbar-actions-inline">
               <button
@@ -9047,7 +9427,7 @@ function App() {
               : 'Survole pour lire les coordonnees'}
           </span>
         </div>
-        {isAdmin && isShortcutHelpOpen ? (
+        {isAdmin && !isPresentationMode && isShortcutHelpOpen ? (
           <div
             className="shortcut-help-overlay"
             role="dialog"
@@ -9073,6 +9453,7 @@ function App() {
                 <li><kbd>M</kbd> Outil mesure</li>
                 <li><kbd>G</kbd> Grille</li>
                 <li><kbd>X</kbd> Snapping</li>
+                <li><kbd>P</kbd> Mode presentation</li>
                 <li><kbd>?</kbd> Ouvrir/fermer cette aide</li>
                 <li><kbd>Enter</kbd> Valider</li>
                 <li><kbd>Backspace</kbd> Annuler point</li>
@@ -9092,7 +9473,7 @@ function App() {
             </div>
           </div>
         ) : null}
-        {isAdmin && isGuidedDrawing && guideGeometry ? (
+        {isAdmin && !isPresentationMode && isGuidedDrawing && guideGeometry ? (
           <div className="map-drawing-hud" role="status" aria-live="polite">
             <p className="map-drawing-hud-title">{drawingGuideTitle}</p>
             <p className="map-drawing-hud-meta">
@@ -9122,7 +9503,7 @@ function App() {
             </div>
           </div>
         ) : null}
-        {isAdmin && featureContextMenu ? (
+        {isAdmin && !isPresentationMode && featureContextMenu ? (
           <div
             className="feature-context-menu"
             role="menu"

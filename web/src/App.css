@@ -5,6 +5,10 @@
   width: 100%;
 }
 
+.app-shell.presentation-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .sidebar {
   border-right: 1px solid var(--border);
   background: var(--panel-bg);
@@ -116,6 +120,13 @@
   gap: 8px;
 }
 
+.layer-row-meta {
+  grid-column: 1 / -1;
+  margin: -1px 0 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
 .layer-row + .layer-row {
   margin-top: 8px;
 }
@@ -184,6 +195,13 @@
 .filters-grid {
   display: grid;
   gap: 10px;
+}
+
+.status-chip-grid {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .filters-grid label,
@@ -354,6 +372,59 @@
   margin-top: 10px;
   display: grid;
   gap: 6px;
+}
+
+.layer-preset-tools {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.layer-preset-tools label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.layer-preset-tools input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+}
+
+.layer-preset-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.layer-preset-list li {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.layer-preset-list strong {
+  font-size: 12px;
+  color: #334155;
+}
+
+.layer-preset-list p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #64748b;
 }
 
 .bookmark-tools label {
@@ -578,6 +649,51 @@
 .map-pane {
   position: relative;
   background: #d4dee4;
+}
+
+.map-floating-actions {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 1001;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.map-welcome-hint {
+  position: absolute;
+  left: 12px;
+  top: 52px;
+  z-index: 1000;
+  width: min(320px, calc(100% - 24px));
+  border: 1px solid rgba(120, 145, 178, 0.48);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.map-welcome-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #16385f;
+}
+
+.map-welcome-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #456280;
+}
+
+.map-welcome-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .map-toolbar {
@@ -1168,6 +1284,17 @@
   .map-cursor-hud {
     left: 10px;
     bottom: 10px;
+  }
+
+  .map-floating-actions {
+    left: 10px;
+    top: 10px;
+  }
+
+  .map-welcome-hint {
+    left: 10px;
+    top: 48px;
+    width: calc(100% - 20px);
   }
 
   .map-scale-hud {
