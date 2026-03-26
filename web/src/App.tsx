@@ -28,6 +28,9 @@ import {
   useMapEvents,
 } from 'react-leaflet'
 import {
+  createLayerMetadata,
+  deleteLayerMetadata,
+  deleteLayerSection,
   type FeatureVersion,
   type ImportFeatureInsert,
   type TrashFeature,
@@ -36,6 +39,9 @@ import {
   importFeaturesToSupabase,
   moveFeatureToTrash,
   persistLayerSortOrder,
+  persistSectionSortOrder,
+  renameLayerMetadata,
+  renameLayerSection,
   restoreFeatureFromTrash,
   restorePreviousFeatureVersion,
 } from './data/adminSupabase'
@@ -280,6 +286,7 @@ interface PersistedUiStateV1 {
   isNorthArrowVisible?: boolean
   isPresentationMode?: boolean
   showWelcomeHint?: boolean
+  isMapToolbarCollapsed?: boolean
   mapView?: {
     center: LatLngTuple
     zoom: number
@@ -1784,6 +1791,16 @@ function getLayerSortOrderValue(layer: LayerConfig, fallback = 0): number {
   return fallback
 }
 
+function getSectionSortOrderValue(layer: LayerConfig, fallback = 0): number {
+  if (
+    typeof layer.sectionSortOrder === 'number' &&
+    Number.isFinite(layer.sectionSortOrder)
+  ) {
+    return layer.sectionSortOrder
+  }
+  return fallback
+}
+
 function toCoordinatesFromImported(
   item: ImportedGeometryFeature,
 ): unknown | null {
@@ -2215,6 +2232,7 @@ function App() {
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false)
   const [isPresentationMode, setIsPresentationMode] = useState(false)
   const [showWelcomeHint, setShowWelcomeHint] = useState(true)
+  const [isMapToolbarCollapsed, setIsMapToolbarCollapsed] = useState(false)
   const [mapViewport, setMapViewport] = useState<{
     center: LatLngTuple
     zoom: number
@@ -2417,6 +2435,12 @@ function App() {
       setIsShortcutHelpOpen(false)
     }
   }, [isPresentationMode])
+
+  useEffect(() => {
+    if (isMapToolbarCollapsed) {
+      setIsShortcutHelpOpen(false)
+    }
+  }, [isMapToolbarCollapsed])
 
   useEffect(() => {
     if (!isPresentationMode) {
@@ -2637,6 +2661,12 @@ function App() {
       if (persistedShowWelcomeHint !== null) {
         setShowWelcomeHint(persistedShowWelcomeHint)
       }
+      const persistedMapToolbarCollapsed = parseBooleanValue(
+        persisted.isMapToolbarCollapsed,
+      )
+      if (persistedMapToolbarCollapsed !== null) {
+        setIsMapToolbarCollapsed(persistedMapToolbarCollapsed)
+      }
 
       if (persisted.localHistoryPast !== undefined) {
         setLocalHistoryPast(parseLocalHistoryEntries(persisted.localHistoryPast))
@@ -2771,6 +2801,7 @@ function App() {
       isNorthArrowVisible,
       isPresentationMode,
       showWelcomeHint,
+      isMapToolbarCollapsed,
       mapView: mapView ?? null,
     }
 
@@ -2799,6 +2830,7 @@ function App() {
     isLabelOverlayEnabled,
     isLabelCollisionEnabled,
     isMeasureMode,
+    isMapToolbarCollapsed,
     isNorthArrowVisible,
     isPresentationMode,
     isRedrawingEditGeometry,
@@ -2824,12 +2856,29 @@ function App() {
     viewBookmarks,
   ])
 
+  const sectionSortOrderByCategory = useMemo(() => {
+    const orders = new Map<string, number>()
+    for (const [index, layer] of layers.entries()) {
+      const nextOrder = getSectionSortOrderValue(layer, index)
+      const currentOrder = orders.get(layer.category)
+      if (currentOrder === undefined || nextOrder < currentOrder) {
+        orders.set(layer.category, nextOrder)
+      }
+    }
+    return orders
+  }, [layers])
+
   const categories = useMemo(
     () =>
-      Array.from(new Set(layers.map((layer) => layer.category))).sort((a, b) =>
-        a.localeCompare(b, 'fr'),
-      ),
-    [layers],
+      Array.from(sectionSortOrderByCategory.entries())
+        .sort((left, right) => {
+          if (left[1] !== right[1]) {
+            return left[1] - right[1]
+          }
+          return left[0].localeCompare(right[0], 'fr')
+        })
+        .map(([category]) => category),
+    [sectionSortOrderByCategory],
   )
 
   const visibleLayers = useMemo(
@@ -2991,16 +3040,25 @@ function App() {
       categories
         .map((category) => ({
           category,
-          layers: layers.filter((layer) => {
-            if (layer.category !== category) {
-              return false
-            }
-            if (normalizedLayerPanelSearchQuery.length === 0) {
-              return true
-            }
-            const haystack = normalizeSearchTerm(`${layer.label} ${layer.category}`)
-            return haystack.includes(normalizedLayerPanelSearchQuery)
-          }),
+          layers: layers
+            .filter((layer) => {
+              if (layer.category !== category) {
+                return false
+              }
+              if (normalizedLayerPanelSearchQuery.length === 0) {
+                return true
+              }
+              const haystack = normalizeSearchTerm(`${layer.label} ${layer.category}`)
+              return haystack.includes(normalizedLayerPanelSearchQuery)
+            })
+            .sort((left, right) => {
+              const bySort =
+                getLayerSortOrderValue(left) - getLayerSortOrderValue(right)
+              if (bySort !== 0) {
+                return bySort
+              }
+              return left.label.localeCompare(right.label, 'fr')
+            }),
         }))
         .filter((block) => block.layers.length > 0),
     [categories, layers, normalizedLayerPanelSearchQuery],
@@ -3160,9 +3218,13 @@ function App() {
           id: layer.id,
           label: layer.label,
           category: layer.category,
+          sectionSortOrder: getSectionSortOrderValue(layer, index),
           sortOrder: getLayerSortOrderValue(layer, index),
         }))
         .sort((a, b) => {
+          if (a.sectionSortOrder !== b.sectionSortOrder) {
+            return a.sectionSortOrder - b.sectionSortOrder
+          }
           const byCategory = a.category.localeCompare(b.category, 'fr')
           if (byCategory !== 0) {
             return byCategory
@@ -5751,6 +5813,474 @@ function App() {
     setAdminNotice('Ordre du calque mis à jour.')
   }
 
+  const handleCreateLayer = useCallback(
+    async (options?: { presetCategory?: string; requireNewSection?: boolean }) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+
+      const categoryPromptDefault =
+        options?.presetCategory?.trim() || categories[0] || ''
+      const categoryPrompt = window.prompt(
+        'Nom de la section cible',
+        categoryPromptDefault || 'Nouvelle section',
+      )
+      if (categoryPrompt === null) {
+        return
+      }
+
+      const nextCategory = categoryPrompt.trim()
+      if (!nextCategory) {
+        setAdminNotice('Nom de section invalide.')
+        return
+      }
+
+      if (
+        options?.requireNewSection &&
+        categories.some(
+          (category) =>
+            category.localeCompare(nextCategory, 'fr', {
+              sensitivity: 'base',
+            }) === 0,
+        )
+      ) {
+        setAdminNotice(`La section "${nextCategory}" existe déjà.`)
+        return
+      }
+
+      const labelPrompt = window.prompt('Nom du nouveau calque', 'Nouveau calque')
+      if (labelPrompt === null) {
+        return
+      }
+      const nextLabel = labelPrompt.trim()
+      if (!nextLabel) {
+        setAdminNotice('Nom de calque invalide.')
+        return
+      }
+
+      const defaultLayerId =
+        toLayerId('', nextLabel) || `layer-${crypto.randomUUID().slice(0, 8)}`
+      const idPrompt = window.prompt(
+        'Identifiant technique du calque',
+        defaultLayerId,
+      )
+      if (idPrompt === null) {
+        return
+      }
+
+      const nextLayerId = toLayerId(idPrompt, nextLabel)
+      if (!nextLayerId) {
+        setAdminNotice('Identifiant de calque invalide.')
+        return
+      }
+
+      if (layers.some((layer) => layer.id === nextLayerId)) {
+        setAdminNotice(`Un calque avec l'identifiant "${nextLayerId}" existe déjà.`)
+        return
+      }
+
+      const labelExistsInSection = layers.some(
+        (layer) =>
+          layer.category === nextCategory &&
+          layer.label.localeCompare(nextLabel, 'fr', { sensitivity: 'base' }) === 0,
+      )
+      if (labelExistsInSection) {
+        setAdminNotice(`Un calque "${nextLabel}" existe déjà dans cette section.`)
+        return
+      }
+
+      const siblingLayers = layers.filter((layer) => layer.category === nextCategory)
+      const nextLayerSortOrder =
+        siblingLayers.reduce(
+          (maxOrder, layer, index) =>
+            Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+          -1,
+        ) + 1
+
+      const existingSectionOrder = sectionSortOrderByCategory.get(nextCategory)
+      const nextSectionSortOrder =
+        sectionSortOrderByCategory.size === 0
+          ? 0
+          : Math.max(...Array.from(sectionSortOrderByCategory.values())) + 1
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await createLayerMetadata({
+        layerId: nextLayerId,
+        label: nextLabel,
+        category: nextCategory,
+        sortOrder: nextLayerSortOrder,
+        sectionSortOrder: existingSectionOrder ?? nextSectionSortOrder,
+      })
+
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur création calque: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers(nextLayerId)
+      setActiveLayers((current) => ({
+        ...current,
+        [nextLayerId]: true,
+      }))
+      setCollapsedLayerFolders((current) => ({
+        ...current,
+        [nextCategory]: false,
+      }))
+      setCreateDraft((current) => ({
+        ...current,
+        category: nextCategory,
+        layerId: nextLayerId,
+        layerLabel: nextLabel,
+      }))
+      setImportDraft((current) => ({
+        ...current,
+        category: nextCategory,
+        layerId: nextLayerId,
+        layerLabel: nextLabel,
+      }))
+
+      setIsSaving(false)
+      setAdminNotice(`Calque "${nextLabel}" créé dans "${nextCategory}".`)
+    },
+    [
+      categories,
+      isAdmin,
+      layers,
+      sectionSortOrderByCategory,
+      syncSupabaseLayers,
+    ],
+  )
+
+  const handleRenameLayer = useCallback(
+    async (category: string, layerId: string, currentLabel: string) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+      if (isLayerLocked(category, layerId)) {
+        setAdminNotice('Calque verrouillé: renommage indisponible.')
+        return
+      }
+
+      const promptValue = window.prompt('Nouveau nom du calque', currentLabel)
+      if (promptValue === null) {
+        return
+      }
+      const nextLabel = promptValue.trim()
+      if (!nextLabel) {
+        setAdminNotice('Nom de calque invalide.')
+        return
+      }
+      if (
+        nextLabel.localeCompare(currentLabel, 'fr', { sensitivity: 'base' }) === 0
+      ) {
+        return
+      }
+
+      const duplicateLabel = layers.some(
+        (layer) =>
+          layer.id !== layerId &&
+          layer.category === category &&
+          layer.label.localeCompare(nextLabel, 'fr', { sensitivity: 'base' }) === 0,
+      )
+      if (duplicateLabel) {
+        setAdminNotice(`Un calque "${nextLabel}" existe déjà dans cette section.`)
+        return
+      }
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await renameLayerMetadata(category, layerId, nextLabel)
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur renommage calque: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers(layerId)
+      setCreateDraft((current) =>
+        current.layerId === layerId && current.category === category
+          ? { ...current, layerLabel: nextLabel }
+          : current,
+      )
+      setImportDraft((current) =>
+        current.layerId === layerId && current.category === category
+          ? { ...current, layerLabel: nextLabel }
+          : current,
+      )
+      setEditDraft((current) =>
+        current && current.layerId === layerId && current.category === category
+          ? { ...current, layerLabel: nextLabel }
+          : current,
+      )
+      setIsSaving(false)
+      setAdminNotice(`Calque renommé en "${nextLabel}".`)
+    },
+    [isAdmin, isLayerLocked, layers, syncSupabaseLayers],
+  )
+
+  const handleDeleteLayer = useCallback(
+    async (category: string, layerId: string, label: string) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+      if (isLayerLocked(category, layerId)) {
+        setAdminNotice('Calque verrouillé: suppression indisponible.')
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Supprimer le calque "${label}" ? Les éléments seront déplacés dans la corbeille.`,
+      )
+      if (!confirmed) {
+        return
+      }
+
+      const shouldResetSelectedFeature =
+        selectedFeatureId !== null &&
+        (() => {
+          const selectedRef = featureById.get(selectedFeatureId)
+          return Boolean(
+            selectedRef &&
+              selectedRef.category === category &&
+              selectedRef.layerId === layerId,
+          )
+        })()
+      const shouldResetSelectedFeatures = selectedFeatureIds.some((featureId) => {
+        const ref = featureById.get(featureId)
+        return Boolean(ref && ref.category === category && ref.layerId === layerId)
+      })
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await deleteLayerMetadata(category, layerId)
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur suppression calque: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers()
+      await refreshTrash()
+      if (shouldResetSelectedFeature || shouldResetSelectedFeatures) {
+        setSelectedFeatureId(null)
+        setSelectedFeatureIds([])
+        setEditDraft(null)
+        setEditPoints([])
+      }
+      setIsSaving(false)
+      setAdminNotice(`Calque "${label}" supprimé.`)
+    },
+    [
+      featureById,
+      isAdmin,
+      isLayerLocked,
+      refreshTrash,
+      selectedFeatureId,
+      selectedFeatureIds,
+      syncSupabaseLayers,
+    ],
+  )
+
+  const handleMoveSection = useCallback(
+    async (category: string, direction: 'up' | 'down') => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+
+      const currentIndex = categories.findIndex(
+        (item) => item.localeCompare(category, 'fr', { sensitivity: 'base' }) === 0,
+      )
+      if (currentIndex === -1) {
+        return
+      }
+
+      const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= categories.length) {
+        return
+      }
+
+      const targetCategory = categories[targetIndex]
+      const currentOrder =
+        sectionSortOrderByCategory.get(category) ?? currentIndex
+      const targetOrder =
+        sectionSortOrderByCategory.get(targetCategory) ?? targetIndex
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await persistSectionSortOrder([
+        { category, sortOrder: targetOrder },
+        { category: targetCategory, sortOrder: currentOrder },
+      ])
+
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur ordre section: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers()
+      setIsSaving(false)
+      setAdminNotice('Ordre des sections mis à jour.')
+    },
+    [categories, isAdmin, sectionSortOrderByCategory, syncSupabaseLayers],
+  )
+
+  const handleRenameSection = useCallback(
+    async (currentCategory: string) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+
+      const promptValue = window.prompt(
+        'Nouveau nom de section',
+        currentCategory,
+      )
+      if (promptValue === null) {
+        return
+      }
+      const nextCategory = promptValue.trim()
+      if (!nextCategory) {
+        setAdminNotice('Nom de section invalide.')
+        return
+      }
+      if (
+        nextCategory.localeCompare(currentCategory, 'fr', {
+          sensitivity: 'base',
+        }) === 0
+      ) {
+        return
+      }
+
+      const duplicateSection = categories.some(
+        (category) =>
+          category.localeCompare(nextCategory, 'fr', {
+            sensitivity: 'base',
+          }) === 0,
+      )
+      if (duplicateSection) {
+        setAdminNotice(`La section "${nextCategory}" existe déjà.`)
+        return
+      }
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await renameLayerSection(currentCategory, nextCategory)
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur renommage section: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers()
+      setCollapsedLayerFolders((current) => {
+        if (current[currentCategory] === undefined) {
+          return current
+        }
+        const next = { ...current, [nextCategory]: current[currentCategory] }
+        delete next[currentCategory]
+        return next
+      })
+      setCreateDraft((current) =>
+        current.category === currentCategory
+          ? { ...current, category: nextCategory }
+          : current,
+      )
+      setImportDraft((current) =>
+        current.category === currentCategory
+          ? { ...current, category: nextCategory }
+          : current,
+      )
+      setEditDraft((current) =>
+        current && current.category === currentCategory
+          ? { ...current, category: nextCategory }
+          : current,
+      )
+      setIsSaving(false)
+      setAdminNotice(`Section renommée en "${nextCategory}".`)
+    },
+    [categories, isAdmin, syncSupabaseLayers],
+  )
+
+  const handleDeleteSection = useCallback(
+    async (category: string) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+
+      const hasLockedLayers = layers.some(
+        (layer) => layer.category === category && isLayerLocked(category, layer.id),
+      )
+      if (hasLockedLayers) {
+        setAdminNotice(
+          'Section verrouillée: déverrouille les calques concernés avant suppression.',
+        )
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Supprimer la section "${category}" ? Tous ses calques seront supprimés et les éléments envoyés en corbeille.`,
+      )
+      if (!confirmed) {
+        return
+      }
+
+      const shouldResetSelectedFeature =
+        selectedFeatureId !== null &&
+        (() => {
+          const selectedRef = featureById.get(selectedFeatureId)
+          return Boolean(selectedRef && selectedRef.category === category)
+        })()
+      const shouldResetSelectedFeatures = selectedFeatureIds.some((featureId) => {
+        const ref = featureById.get(featureId)
+        return Boolean(ref && ref.category === category)
+      })
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await deleteLayerSection(category)
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur suppression section: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers()
+      await refreshTrash()
+      if (shouldResetSelectedFeature || shouldResetSelectedFeatures) {
+        setSelectedFeatureId(null)
+        setSelectedFeatureIds([])
+        setEditDraft(null)
+        setEditPoints([])
+      }
+      setIsSaving(false)
+      setAdminNotice(`Section "${category}" supprimée.`)
+    },
+    [
+      featureById,
+      isAdmin,
+      isLayerLocked,
+      layers,
+      refreshTrash,
+      selectedFeatureId,
+      selectedFeatureIds,
+      syncSupabaseLayers,
+    ],
+  )
+
   const handleDuplicateLayer = useCallback(
     async (category: string, layerId: string) => {
       if (!supabase || !isAdmin) {
@@ -8235,6 +8765,30 @@ function App() {
             >
               Replier catégories
             </button>
+            {isAdmin ? (
+              <>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={() => void handleCreateLayer()}
+                  disabled={isSaving}
+                >
+                  Nouveau calque
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={() =>
+                    void handleCreateLayer({
+                      requireNewSection: true,
+                    })
+                  }
+                  disabled={isSaving}
+                >
+                  Nouvelle section
+                </button>
+              </>
+            ) : null}
           </div>
           <div className="layer-preset-tools">
             <label>
@@ -8296,197 +8850,288 @@ function App() {
           {layersByCategory.length === 0 ? (
             <p className="muted">Aucun calque ne correspond à ta recherche.</p>
           ) : null}
-          {layersByCategory.map((block) => (
-            <div key={block.category} className="layer-group">
-              <button
-                type="button"
-                className="layer-folder-toggle"
-                onClick={() => toggleLayerFolder(block.category)}
-                aria-expanded={!collapsedLayerFolders[block.category]}
-              >
-                <span>{collapsedLayerFolders[block.category] ? '▸' : '▾'}</span>
-                <strong>{block.category}</strong>
-                <small>
-                  {block.layers.filter((layer) => activeLayers[layer.id]).length}/
-                  {block.layers.length}
-                </small>
-              </button>
-              {collapsedLayerFolders[block.category]
-                ? null
-                : block.layers.map((layer, index) => {
-                    const layerLocked = isLayerLocked(block.category, layer.id)
-                    const layerZoomKey = toLayerLockKey(block.category, layer.id)
-                    const zoomRule = layerZoomVisibility[layerZoomKey] ?? {
-                      minZoom: 10,
-                      maxZoom: 18,
-                    }
-                    const hasCustomZoomRule = layerZoomVisibility[layerZoomKey] !== undefined
-                    const layerOpacity = layerOpacityByKey[layerZoomKey] ?? 1
-                    const hasCustomOpacity = layerOpacityByKey[layerZoomKey] !== undefined
-                    return (
-                      <div
-                        key={layer.id}
-                        className={`layer-row${layerLocked ? ' is-locked' : ''}`}
+          {layersByCategory.map((block) => {
+            const sectionIndex = categories.findIndex(
+              (category) => category === block.category,
+            )
+            const isFirstSection = sectionIndex <= 0
+            const isLastSection = sectionIndex === categories.length - 1
+
+            return (
+              <div key={block.category} className="layer-group">
+                <div className="layer-folder-header">
+                  <button
+                    type="button"
+                    className="layer-folder-toggle"
+                    onClick={() => toggleLayerFolder(block.category)}
+                    aria-expanded={!collapsedLayerFolders[block.category]}
+                  >
+                    <span>{collapsedLayerFolders[block.category] ? '▸' : '▾'}</span>
+                    <strong>{block.category}</strong>
+                    <small>
+                      {block.layers.filter((layer) => activeLayers[layer.id]).length}/
+                      {block.layers.length}
+                    </small>
+                  </button>
+                  {isAdmin ? (
+                    <div className="layer-folder-actions">
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() =>
+                          void handleCreateLayer({ presetCategory: block.category })
+                        }
+                        disabled={isSaving}
+                        title="Créer un calque dans cette section"
                       >
-                        <label className="control-row">
-                          <input
-                            type="checkbox"
-                            checked={activeLayers[layer.id]}
-                            onChange={() => toggleLayer(layer.id)}
-                          />
-                          <span>
-                            {layer.label}
-                            {layerLocked ? ' (verrouillé)' : ''}
-                          </span>
-                        </label>
-                        <p className="layer-row-meta">
-                          {layerVisibleCountById.get(layer.id) ?? 0}/{layer.features.length}{' '}
-                          élément(s) avec filtres
-                        </p>
-                        {isAdmin ? (
-                          <div className="layer-order-actions">
+                        + calque
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() => void handleRenameSection(block.category)}
+                        disabled={isSaving}
+                        title="Renommer la section"
+                      >
+                        Ren.
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() => void handleMoveSection(block.category, 'up')}
+                        disabled={isSaving || isFirstSection}
+                        title="Monter la section"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={() => void handleMoveSection(block.category, 'down')}
+                        disabled={isSaving || isLastSection}
+                        title="Descendre la section"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button mini-button"
+                        onClick={() => void handleDeleteSection(block.category)}
+                        disabled={isSaving}
+                        title="Supprimer la section"
+                      >
+                        Suppr.
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                {collapsedLayerFolders[block.category]
+                  ? null
+                  : block.layers.map((layer, index) => {
+                      const layerLocked = isLayerLocked(block.category, layer.id)
+                      const layerZoomKey = toLayerLockKey(block.category, layer.id)
+                      const zoomRule = layerZoomVisibility[layerZoomKey] ?? {
+                        minZoom: 10,
+                        maxZoom: 18,
+                      }
+                      const hasCustomZoomRule =
+                        layerZoomVisibility[layerZoomKey] !== undefined
+                      const layerOpacity = layerOpacityByKey[layerZoomKey] ?? 1
+                      const hasCustomOpacity =
+                        layerOpacityByKey[layerZoomKey] !== undefined
+                      return (
+                        <div
+                          key={layer.id}
+                          className={`layer-row${layerLocked ? ' is-locked' : ''}`}
+                        >
+                          <label className="control-row">
+                            <input
+                              type="checkbox"
+                              checked={activeLayers[layer.id]}
+                              onChange={() => toggleLayer(layer.id)}
+                            />
+                            <span>
+                              {layer.label}
+                              {layerLocked ? ' (verrouillé)' : ''}
+                            </span>
+                          </label>
+                          <p className="layer-row-meta">
+                            {layerVisibleCountById.get(layer.id) ?? 0}/{layer.features.length}{' '}
+                            élément(s) avec filtres
+                          </p>
+                          {isAdmin ? (
+                            <div className="layer-order-actions">
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() => handleSoloLayer(block.category, layer.id)}
+                                title="Activer uniquement ce calque"
+                              >
+                                Solo
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() => handleFitLayer(block.category, layer.id)}
+                                title="Cadrer ce calque"
+                              >
+                                Zoom
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() => toggleLayerLock(block.category, layer.id)}
+                                disabled={isSaving}
+                                title={layerLocked ? 'Déverrouiller' : 'Verrouiller'}
+                              >
+                                {layerLocked ? 'Deverr.' : 'Verrou.'}
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() =>
+                                  void handleRenameLayer(
+                                    block.category,
+                                    layer.id,
+                                    layer.label,
+                                  )
+                                }
+                                disabled={isSaving || layerLocked}
+                                title="Renommer le calque"
+                              >
+                                Ren.
+                              </button>
+                              <button
+                                type="button"
+                                className="danger-button mini-button"
+                                onClick={() =>
+                                  void handleDeleteLayer(
+                                    block.category,
+                                    layer.id,
+                                    layer.label,
+                                  )
+                                }
+                                disabled={isSaving || layerLocked}
+                                title="Supprimer le calque"
+                              >
+                                Suppr.
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() =>
+                                  void handleDuplicateLayer(block.category, layer.id)
+                                }
+                                disabled={isSaving || layerLocked}
+                                title="Dupliquer le calque"
+                              >
+                                Dupl.
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() =>
+                                  void handleMoveLayer(block.category, layer.id, 'up')
+                                }
+                                disabled={isSaving || index === 0}
+                                title="Monter"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button mini-button"
+                                onClick={() =>
+                                  void handleMoveLayer(block.category, layer.id, 'down')
+                                }
+                                disabled={isSaving || index === block.layers.length - 1}
+                                title="Descendre"
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          ) : null}
+                          <div className="layer-zoom-controls">
+                            <label>
+                              min
+                              <input
+                                type="number"
+                                min={10}
+                                max={18}
+                                step={1}
+                                value={zoomRule.minZoom}
+                                onChange={(event) =>
+                                  handleLayerZoomChange(
+                                    block.category,
+                                    layer.id,
+                                    'minZoom',
+                                    Number.parseInt(event.target.value || '10', 10),
+                                  )
+                                }
+                              />
+                            </label>
+                            <label>
+                              max
+                              <input
+                                type="number"
+                                min={10}
+                                max={18}
+                                step={1}
+                                value={zoomRule.maxZoom}
+                                onChange={(event) =>
+                                  handleLayerZoomChange(
+                                    block.category,
+                                    layer.id,
+                                    'maxZoom',
+                                    Number.parseInt(event.target.value || '18', 10),
+                                  )
+                                }
+                              />
+                            </label>
                             <button
                               type="button"
                               className="ghost-button mini-button"
-                              onClick={() => handleSoloLayer(block.category, layer.id)}
-                              title="Activer uniquement ce calque"
+                              onClick={() => handleResetLayerZoom(block.category, layer.id)}
+                              disabled={!hasCustomZoomRule}
+                              title="Réinitialiser min/max zoom"
                             >
-                              Solo
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() => handleFitLayer(block.category, layer.id)}
-                              title="Cadrer ce calque"
-                            >
-                              Zoom
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() =>
-                                toggleLayerLock(block.category, layer.id)
-                              }
-                              disabled={isSaving}
-                              title={layerLocked ? 'Déverrouiller' : 'Verrouiller'}
-                            >
-                              {layerLocked ? 'Deverr.' : 'Verrou.'}
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() =>
-                                void handleDuplicateLayer(block.category, layer.id)
-                              }
-                              disabled={isSaving || layerLocked}
-                              title="Dupliquer le calque"
-                            >
-                              Dupl.
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() =>
-                                void handleMoveLayer(block.category, layer.id, 'up')
-                              }
-                              disabled={isSaving || index === 0}
-                              title="Monter"
-                            >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() =>
-                                void handleMoveLayer(block.category, layer.id, 'down')
-                              }
-                              disabled={isSaving || index === block.layers.length - 1}
-                              title="Descendre"
-                            >
-                              ↓
+                              Auto
                             </button>
                           </div>
-                        ) : null}
-                        <div className="layer-zoom-controls">
-                          <label>
-                            min
-                            <input
-                              type="number"
-                              min={10}
-                              max={18}
-                              step={1}
-                              value={zoomRule.minZoom}
-                              onChange={(event) =>
-                                handleLayerZoomChange(
-                                  block.category,
-                                  layer.id,
-                                  'minZoom',
-                                  Number.parseInt(event.target.value || '10', 10),
-                                )
-                              }
-                            />
-                          </label>
-                          <label>
-                            max
-                            <input
-                              type="number"
-                              min={10}
-                              max={18}
-                              step={1}
-                              value={zoomRule.maxZoom}
-                              onChange={(event) =>
-                                handleLayerZoomChange(
-                                  block.category,
-                                  layer.id,
-                                  'maxZoom',
-                                  Number.parseInt(event.target.value || '18', 10),
-                                )
-                              }
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="ghost-button mini-button"
-                            onClick={() => handleResetLayerZoom(block.category, layer.id)}
-                            disabled={!hasCustomZoomRule}
-                            title="Réinitialiser min/max zoom"
-                          >
-                            Auto
-                          </button>
+                          <div className="layer-opacity-controls">
+                            <label>
+                              Opacite {Math.round(layerOpacity * 100)}%
+                              <input
+                                type="range"
+                                min={15}
+                                max={100}
+                                step={5}
+                                value={Math.round(layerOpacity * 100)}
+                                onChange={(event) =>
+                                  handleLayerOpacityChange(
+                                    block.category,
+                                    layer.id,
+                                    Number.parseInt(event.target.value || '100', 10) / 100,
+                                  )
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="ghost-button mini-button"
+                              onClick={() => handleResetLayerOpacity(block.category, layer.id)}
+                              disabled={!hasCustomOpacity}
+                              title="Réinitialiser opacité du calque"
+                            >
+                              100%
+                            </button>
+                          </div>
                         </div>
-                        <div className="layer-opacity-controls">
-                          <label>
-                            Opacite {Math.round(layerOpacity * 100)}%
-                            <input
-                              type="range"
-                              min={15}
-                              max={100}
-                              step={5}
-                              value={Math.round(layerOpacity * 100)}
-                              onChange={(event) =>
-                                handleLayerOpacityChange(
-                                  block.category,
-                                  layer.id,
-                                  Number.parseInt(event.target.value || '100', 10) / 100,
-                                )
-                              }
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="ghost-button mini-button"
-                            onClick={() => handleResetLayerOpacity(block.category, layer.id)}
-                            disabled={!hasCustomOpacity}
-                            title="Réinitialiser opacité du calque"
-                          >
-                            100%
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-            </div>
-          ))}
+                      )
+                    })}
+              </div>
+            )
+          })}
         </section>
 
         <section className="panel-block legend-block">
@@ -8620,9 +9265,27 @@ function App() {
           </div>
         ) : null}
         {isAdmin && !isPresentationMode ? (
-          <div className="map-toolbar" role="toolbar" aria-label="Outils carte">
-            <p className="map-toolbar-title">Outils carte</p>
-            <div className="map-toolbar-buttons">
+          <div
+            className={`map-toolbar${isMapToolbarCollapsed ? ' is-collapsed' : ''}`}
+            role="toolbar"
+            aria-label="Outils carte"
+          >
+            <div className="map-toolbar-header">
+              <p className="map-toolbar-title">Outils carte</p>
+              <button
+                type="button"
+                className="ghost-button mini-button map-toolbar-toggle"
+                onClick={() => setIsMapToolbarCollapsed((current) => !current)}
+                aria-expanded={!isMapToolbarCollapsed}
+                title={isMapToolbarCollapsed ? 'Déplier les outils' : 'Réduire les outils'}
+              >
+                {isMapToolbarCollapsed ? 'Déplier' : 'Réduire'}
+              </button>
+            </div>
+
+            {!isMapToolbarCollapsed ? (
+              <>
+                <div className="map-toolbar-buttons">
               {MAP_TOOLBAR_TOOLS.map((tool) => {
                 const isActive =
                   adminMode === tool.mode &&
@@ -9403,6 +10066,8 @@ function App() {
                 <p className="map-toolbar-meta">Aucune action locale.</p>
               )}
             </div>
+              </>
+            ) : null}
           </div>
         ) : null}
         {mapScaleHud ? (

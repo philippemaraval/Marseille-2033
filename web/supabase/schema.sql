@@ -45,6 +45,28 @@ create index if not exists idx_map_features_deleted_at
 create index if not exists idx_map_features_category_layer_sort
   on public.map_features (category, layer_sort_order, layer_label);
 
+create table if not exists public.map_layers (
+  id text primary key,
+  label text not null,
+  category text not null,
+  section_sort_order integer not null default 0,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.map_layers
+  add column if not exists section_sort_order integer not null default 0;
+
+alter table public.map_layers
+  add column if not exists sort_order integer not null default 0;
+
+create index if not exists idx_map_layers_category_order
+  on public.map_layers (section_sort_order, category, sort_order, label);
+
+create unique index if not exists idx_map_layers_category_label_lower
+  on public.map_layers (category, lower(label));
+
 do $$
 declare
   has_non_zero_order boolean;
@@ -77,7 +99,65 @@ begin
 end;
 $$;
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'map_features'
+  ) then
+    with section_rank as (
+      select
+        category,
+        dense_rank() over (
+          order by min(coalesce(layer_sort_order, 0)), category
+        ) - 1 as section_sort_order
+      from public.map_features
+      group by category
+    ),
+    ranked_layers as (
+      select
+        layer_id,
+        layer_label,
+        category,
+        coalesce(layer_sort_order, 0) as sort_order,
+        row_number() over (
+          partition by layer_id
+          order by coalesce(layer_sort_order, 0), category, layer_label
+        ) as layer_rank
+      from public.map_features
+    )
+    insert into public.map_layers (id, label, category, section_sort_order, sort_order)
+    select
+      ranked_layers.layer_id as id,
+      ranked_layers.layer_label as label,
+      ranked_layers.category,
+      coalesce(section_rank.section_sort_order, 0) as section_sort_order,
+      ranked_layers.sort_order
+    from ranked_layers
+    left join section_rank
+      on section_rank.category = ranked_layers.category
+    where ranked_layers.layer_rank = 1
+    on conflict (id)
+    do update set
+      label = excluded.label,
+      category = excluded.category,
+      section_sort_order = excluded.section_sort_order,
+      sort_order = excluded.sort_order;
+  end if;
+end;
+$$;
+
 create or replace function public.set_map_features_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$ language plpgsql;
+
+create or replace function public.set_map_layers_updated_at()
 returns trigger as $$
 begin
   new.updated_at = timezone('utc', now());
@@ -90,7 +170,83 @@ create trigger trg_map_features_updated_at
 before update on public.map_features
 for each row execute function public.set_map_features_updated_at();
 
+drop trigger if exists trg_map_layers_updated_at on public.map_layers;
+create trigger trg_map_layers_updated_at
+before update on public.map_layers
+for each row execute function public.set_map_layers_updated_at();
+
+create or replace function public.ensure_map_layers_from_feature()
+returns trigger
+language plpgsql
+as $$
+declare
+  normalized_category text;
+  normalized_label text;
+  resolved_sort integer;
+  resolved_section_sort integer;
+begin
+  normalized_category := btrim(new.category);
+  if normalized_category is null or normalized_category = '' then
+    raise exception 'category cannot be empty';
+  end if;
+
+  normalized_label := btrim(new.layer_label);
+  if normalized_label is null or normalized_label = '' then
+    raise exception 'layer_label cannot be empty';
+  end if;
+
+  select section_sort_order
+  into resolved_section_sort
+  from public.map_layers
+  where category = normalized_category
+  order by section_sort_order asc, sort_order asc, label asc
+  limit 1;
+
+  if resolved_section_sort is null then
+    select coalesce(max(section_sort_order), -1) + 1
+    into resolved_section_sort
+    from public.map_layers;
+  end if;
+
+  resolved_sort := coalesce(new.layer_sort_order, 0);
+
+  if new.layer_sort_order is null then
+    select coalesce(max(sort_order), -1) + 1
+    into resolved_sort
+    from public.map_layers
+    where category = normalized_category;
+  end if;
+
+  insert into public.map_layers (id, label, category, section_sort_order, sort_order)
+  values (
+    new.layer_id,
+    normalized_label,
+    normalized_category,
+    resolved_section_sort,
+    resolved_sort
+  )
+  on conflict (id)
+  do update set
+    label = excluded.label,
+    category = excluded.category,
+    section_sort_order = excluded.section_sort_order,
+    sort_order = excluded.sort_order;
+
+  new.category := normalized_category;
+  new.layer_label := normalized_label;
+  new.layer_sort_order := resolved_sort;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_map_features_ensure_layers on public.map_features;
+create trigger trg_map_features_ensure_layers
+before insert or update on public.map_features
+for each row execute function public.ensure_map_layers_from_feature();
+
 alter table public.map_features enable row level security;
+alter table public.map_layers enable row level security;
 
 drop policy if exists "Public read map_features" on public.map_features;
 create policy "Public read map_features"
@@ -101,6 +257,20 @@ using (deleted_at is null);
 drop policy if exists "Authenticated write map_features" on public.map_features;
 create policy "Authenticated write map_features"
 on public.map_features
+for all
+to authenticated
+using (true)
+with check (true);
+
+drop policy if exists "Public read map_layers" on public.map_layers;
+create policy "Public read map_layers"
+on public.map_layers
+for select
+using (true);
+
+drop policy if exists "Authenticated write map_layers" on public.map_layers;
+create policy "Authenticated write map_layers"
+on public.map_layers
 for all
 to authenticated
 using (true)

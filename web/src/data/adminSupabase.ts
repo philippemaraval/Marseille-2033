@@ -60,6 +60,19 @@ interface PersistLayerOrderInput {
   sortOrder: number
 }
 
+interface PersistSectionOrderInput {
+  category: string
+  sortOrder: number
+}
+
+interface CreateLayerMetadataInput {
+  layerId: string
+  label: string
+  category: string
+  sortOrder: number
+  sectionSortOrder: number
+}
+
 export interface ImportFeatureInsert {
   id: string
   name: string
@@ -82,12 +95,25 @@ function normalizeAdminError(message: string): string {
   if (
     (normalized.includes('column') && normalized.includes('does not exist')) ||
     (normalized.includes('relation') && normalized.includes('does not exist')) ||
-    normalized.includes('map_feature_versions')
+    normalized.includes('map_feature_versions') ||
+    normalized.includes('map_layers')
   ) {
     return 'Schema Supabase incomplet. Execute web/supabase/schema.sql dans SQL Editor.'
   }
 
   return message
+}
+
+function isMissingLayerRegistrySchemaError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    (normalized.includes('relation') &&
+      normalized.includes('map_layers') &&
+      normalized.includes('does not exist')) ||
+    (normalized.includes('column') &&
+      normalized.includes('section_sort_order') &&
+      normalized.includes('does not exist'))
+  )
 }
 
 function isMissingStyleColumnError(message: string): boolean {
@@ -349,6 +375,16 @@ export async function persistLayerSortOrder(
   }
 
   for (const update of updates) {
+    const { error: layerError } = await supabase
+      .from('map_layers')
+      .update({ sort_order: update.sortOrder })
+      .eq('id', update.layerId)
+      .eq('category', update.category)
+
+    if (layerError && !isMissingLayerRegistrySchemaError(layerError.message)) {
+      return { ok: false, error: normalizeAdminError(layerError.message) }
+    }
+
     const { error } = await supabase
       .from('map_features')
       .update({ layer_sort_order: update.sortOrder })
@@ -358,6 +394,196 @@ export async function persistLayerSortOrder(
     if (error) {
       return { ok: false, error: normalizeAdminError(error.message) }
     }
+  }
+
+  return { ok: true, data: null }
+}
+
+export async function persistSectionSortOrder(
+  updates: PersistSectionOrderInput[],
+): Promise<Result<null>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  for (const update of updates) {
+    const { error } = await supabase
+      .from('map_layers')
+      .update({ section_sort_order: update.sortOrder })
+      .eq('category', update.category)
+
+    if (error) {
+      return { ok: false, error: normalizeAdminError(error.message) }
+    }
+  }
+
+  return { ok: true, data: null }
+}
+
+export async function createLayerMetadata(
+  input: CreateLayerMetadataInput,
+): Promise<Result<null>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const payload = {
+    id: input.layerId,
+    label: input.label.trim(),
+    category: input.category.trim(),
+    sort_order: input.sortOrder,
+    section_sort_order: input.sectionSortOrder,
+  }
+
+  const { error } = await supabase.from('map_layers').insert(payload)
+  if (error) {
+    return { ok: false, error: normalizeAdminError(error.message) }
+  }
+
+  return { ok: true, data: null }
+}
+
+export async function renameLayerMetadata(
+  category: string,
+  layerId: string,
+  nextLabel: string,
+): Promise<Result<null>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const normalizedLabel = nextLabel.trim()
+  if (!normalizedLabel) {
+    return { ok: false, error: 'Nom de calque vide.' }
+  }
+
+  const { error: layerError } = await supabase
+    .from('map_layers')
+    .update({ label: normalizedLabel })
+    .eq('id', layerId)
+    .eq('category', category)
+
+  if (layerError) {
+    return { ok: false, error: normalizeAdminError(layerError.message) }
+  }
+
+  const { error: featureError } = await supabase
+    .from('map_features')
+    .update({ layer_label: normalizedLabel })
+    .eq('layer_id', layerId)
+    .eq('category', category)
+
+  if (featureError) {
+    return { ok: false, error: normalizeAdminError(featureError.message) }
+  }
+
+  return { ok: true, data: null }
+}
+
+export async function deleteLayerMetadata(
+  category: string,
+  layerId: string,
+): Promise<Result<null>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const { data: authData } = await supabase.auth.getUser()
+  const deletedBy = authData.user?.id ?? null
+  const deletedAt = new Date().toISOString()
+
+  const { error: featureError } = await supabase
+    .from('map_features')
+    .update({
+      deleted_at: deletedAt,
+      deleted_by: deletedBy,
+    })
+    .eq('category', category)
+    .eq('layer_id', layerId)
+    .is('deleted_at', null)
+
+  if (featureError) {
+    return { ok: false, error: normalizeAdminError(featureError.message) }
+  }
+
+  const { error: layerError } = await supabase
+    .from('map_layers')
+    .delete()
+    .eq('id', layerId)
+    .eq('category', category)
+
+  if (layerError && !isMissingLayerRegistrySchemaError(layerError.message)) {
+    return { ok: false, error: normalizeAdminError(layerError.message) }
+  }
+
+  return { ok: true, data: null }
+}
+
+export async function renameLayerSection(
+  currentCategory: string,
+  nextCategory: string,
+): Promise<Result<null>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const normalizedNextCategory = nextCategory.trim()
+  if (!normalizedNextCategory) {
+    return { ok: false, error: 'Nom de section vide.' }
+  }
+
+  const { error: layerError } = await supabase
+    .from('map_layers')
+    .update({ category: normalizedNextCategory })
+    .eq('category', currentCategory)
+
+  if (layerError) {
+    return { ok: false, error: normalizeAdminError(layerError.message) }
+  }
+
+  const { error: featureError } = await supabase
+    .from('map_features')
+    .update({ category: normalizedNextCategory })
+    .eq('category', currentCategory)
+
+  if (featureError) {
+    return { ok: false, error: normalizeAdminError(featureError.message) }
+  }
+
+  return { ok: true, data: null }
+}
+
+export async function deleteLayerSection(
+  category: string,
+): Promise<Result<null>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const { data: authData } = await supabase.auth.getUser()
+  const deletedBy = authData.user?.id ?? null
+  const deletedAt = new Date().toISOString()
+
+  const { error: featureError } = await supabase
+    .from('map_features')
+    .update({
+      deleted_at: deletedAt,
+      deleted_by: deletedBy,
+    })
+    .eq('category', category)
+    .is('deleted_at', null)
+
+  if (featureError) {
+    return { ok: false, error: normalizeAdminError(featureError.message) }
+  }
+
+  const { error: layerError } = await supabase
+    .from('map_layers')
+    .delete()
+    .eq('category', category)
+
+  if (layerError && !isMissingLayerRegistrySchemaError(layerError.message)) {
+    return { ok: false, error: normalizeAdminError(layerError.message) }
   }
 
   return { ok: true, data: null }

@@ -25,6 +25,14 @@ interface MapFeatureRow {
   layer_sort_order: number | null
 }
 
+interface MapLayerMetaRow {
+  id: string
+  label: string
+  category: string
+  section_sort_order: number | null
+  sort_order: number | null
+}
+
 const STATUS_DEFAULT_COLOR: Record<StatusId, string> = {
   existant: '#15803d',
   'en cours': '#b45309',
@@ -214,18 +222,175 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
 
 function isMissingSchemaError(message: string): boolean {
   const normalized = message.toLowerCase()
+  return normalized.includes('column') && normalized.includes('does not exist')
+}
+
+function isMissingLayerMetadataSchemaError(message: string): boolean {
+  const normalized = message.toLowerCase()
   return (
-    normalized.includes('column') && normalized.includes('does not exist')
+    (normalized.includes('relation') &&
+      normalized.includes('map_layers') &&
+      normalized.includes('does not exist')) ||
+    (normalized.includes('column') &&
+      normalized.includes('section_sort_order') &&
+      normalized.includes('does not exist'))
   )
 }
 
-async function fetchRowsWithCurrentSchema(): Promise<{
-  ok: true
-  rows: MapFeatureRow[]
-} | {
-  ok: false
-  error: string
-}> {
+function normalizeLayerSortOrder(value: number | null | undefined): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  return 0
+}
+
+function normalizeSectionSortOrder(value: number | null | undefined): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  return Number.MAX_SAFE_INTEGER
+}
+
+function sortLayers(items: LayerConfig[]): LayerConfig[] {
+  return items.sort((a, b) => {
+    const bySection =
+      normalizeSectionSortOrder(a.sectionSortOrder) -
+      normalizeSectionSortOrder(b.sectionSortOrder)
+    if (bySection !== 0) {
+      return bySection
+    }
+    const byCategory = a.category.localeCompare(b.category, 'fr')
+    if (byCategory !== 0) {
+      return byCategory
+    }
+    const leftSort = normalizeLayerSortOrder(a.sortOrder)
+    const rightSort = normalizeLayerSortOrder(b.sortOrder)
+    if (leftSort !== rightSort) {
+      return leftSort - rightSort
+    }
+    return a.label.localeCompare(b.label, 'fr')
+  })
+}
+
+function buildLayersFromFeatureRows(rows: MapFeatureRow[]): LayerConfig[] {
+  const layerMap = new Map<string, LayerConfig>()
+  const sectionSortByCategory = new Map<string, number>()
+  let nextSectionSortOrder = 0
+
+  for (const row of rows) {
+    const feature = toFeature(row)
+    if (!feature) {
+      continue
+    }
+
+    if (!sectionSortByCategory.has(row.category)) {
+      sectionSortByCategory.set(row.category, nextSectionSortOrder)
+      nextSectionSortOrder += 1
+    }
+
+    const existingLayer = layerMap.get(row.layer_id)
+    if (!existingLayer) {
+      layerMap.set(row.layer_id, {
+        id: row.layer_id,
+        label: row.layer_label,
+        category: row.category,
+        sectionSortOrder: sectionSortByCategory.get(row.category) ?? 0,
+        sortOrder: normalizeLayerSortOrder(row.layer_sort_order),
+        features: [feature],
+      })
+      continue
+    }
+
+    if (
+      typeof row.layer_sort_order === 'number' &&
+      Number.isFinite(row.layer_sort_order)
+    ) {
+      existingLayer.sortOrder = Math.min(
+        normalizeLayerSortOrder(existingLayer.sortOrder),
+        row.layer_sort_order,
+      )
+    }
+
+    existingLayer.features.push(feature)
+  }
+
+  return sortLayers(Array.from(layerMap.values()))
+}
+
+function buildLayersFromRowsWithMetadata(
+  featureRows: MapFeatureRow[],
+  metadataRows: MapLayerMetaRow[],
+): LayerConfig[] {
+  const layerMap = new Map<string, LayerConfig>()
+  const sectionSortByCategory = new Map<string, number>()
+
+  for (const metadata of metadataRows) {
+    const normalizedSectionSort =
+      typeof metadata.section_sort_order === 'number' &&
+      Number.isFinite(metadata.section_sort_order)
+        ? metadata.section_sort_order
+        : 0
+
+    const knownSectionSort = sectionSortByCategory.get(metadata.category)
+    if (knownSectionSort === undefined || normalizedSectionSort < knownSectionSort) {
+      sectionSortByCategory.set(metadata.category, normalizedSectionSort)
+    }
+
+    layerMap.set(metadata.id, {
+      id: metadata.id,
+      label: metadata.label,
+      category: metadata.category,
+      sectionSortOrder: normalizedSectionSort,
+      sortOrder: normalizeLayerSortOrder(metadata.sort_order),
+      features: [],
+    })
+  }
+
+  let nextSectionSortOrder =
+    sectionSortByCategory.size === 0
+      ? 0
+      : Math.max(...Array.from(sectionSortByCategory.values())) + 1
+
+  for (const row of featureRows) {
+    const feature = toFeature(row)
+    if (!feature) {
+      continue
+    }
+
+    if (!sectionSortByCategory.has(row.category)) {
+      sectionSortByCategory.set(row.category, nextSectionSortOrder)
+      nextSectionSortOrder += 1
+    }
+
+    const existingLayer = layerMap.get(row.layer_id)
+    if (!existingLayer) {
+      layerMap.set(row.layer_id, {
+        id: row.layer_id,
+        label: row.layer_label,
+        category: row.category,
+        sectionSortOrder: sectionSortByCategory.get(row.category) ?? 0,
+        sortOrder: normalizeLayerSortOrder(row.layer_sort_order),
+        features: [feature],
+      })
+      continue
+    }
+
+    existingLayer.features.push(feature)
+  }
+
+  return sortLayers(Array.from(layerMap.values()))
+}
+
+async function fetchRowsWithCurrentSchema(): Promise<
+  | {
+      ok: true
+      rows: MapFeatureRow[]
+    }
+  | {
+      ok: false
+      error: string
+    }
+> {
   if (!supabase) {
     return { ok: false, error: 'Supabase non configure.' }
   }
@@ -265,13 +430,16 @@ async function fetchRowsWithCurrentSchema(): Promise<{
   return { ok: true, rows }
 }
 
-async function fetchRowsWithCurrentSchemaWithoutStyle(): Promise<{
-  ok: true
-  rows: MapFeatureRow[]
-} | {
-  ok: false
-  error: string
-}> {
+async function fetchRowsWithCurrentSchemaWithoutStyle(): Promise<
+  | {
+      ok: true
+      rows: MapFeatureRow[]
+    }
+  | {
+      ok: false
+      error: string
+    }
+> {
   if (!supabase) {
     return { ok: false, error: 'Supabase non configure.' }
   }
@@ -314,13 +482,16 @@ async function fetchRowsWithCurrentSchemaWithoutStyle(): Promise<{
   return { ok: true, rows }
 }
 
-async function fetchRowsWithLegacySchema(): Promise<{
-  ok: true
-  rows: MapFeatureRow[]
-} | {
-  ok: false
-  error: string
-}> {
+async function fetchRowsWithLegacySchema(): Promise<
+  | {
+      ok: true
+      rows: MapFeatureRow[]
+    }
+  | {
+      ok: false
+      error: string
+    }
+> {
   if (!supabase) {
     return { ok: false, error: 'Supabase non configure.' }
   }
@@ -363,6 +534,49 @@ async function fetchRowsWithLegacySchema(): Promise<{
   return { ok: true, rows }
 }
 
+async function fetchLayerMetadataRows(): Promise<
+  | { ok: true; rows: MapLayerMetaRow[] }
+  | { ok: false; error: string; missingSchema: boolean }
+> {
+  if (!supabase) {
+    return { ok: false, error: 'Supabase non configure.', missingSchema: false }
+  }
+
+  const pageSize = 1000
+  let offset = 0
+  const rows: MapLayerMetaRow[] = []
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from('map_layers')
+      .select('id,label,category,section_sort_order,sort_order')
+      .order('section_sort_order')
+      .order('category')
+      .order('sort_order')
+      .order('label')
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message,
+        missingSchema: isMissingLayerMetadataSchemaError(error.message),
+      }
+    }
+
+    const pageRows = (data || []) as MapLayerMetaRow[]
+    rows.push(...pageRows)
+
+    if (pageRows.length < pageSize) {
+      break
+    }
+
+    offset += pageSize
+  }
+
+  return { ok: true, rows }
+}
+
 export async function fetchLayersFromSupabase(): Promise<FetchResult> {
   if (!hasSupabase || !supabase) {
     return {
@@ -372,70 +586,36 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
   }
 
   const currentSchemaResult = await fetchRowsWithCurrentSchema()
-  let rows: MapFeatureRow[] = []
+  let featureRows: MapFeatureRow[] = []
 
   if (currentSchemaResult.ok) {
-    rows = currentSchemaResult.rows
+    featureRows = currentSchemaResult.rows
   } else if (isMissingSchemaError(currentSchemaResult.error)) {
     const withoutStyleResult = await fetchRowsWithCurrentSchemaWithoutStyle()
     if (withoutStyleResult.ok) {
-      rows = withoutStyleResult.rows
+      featureRows = withoutStyleResult.rows
     } else {
       const legacySchemaResult = await fetchRowsWithLegacySchema()
       if (!legacySchemaResult.ok) {
         return { ok: false, error: legacySchemaResult.error }
       }
-      rows = legacySchemaResult.rows
+      featureRows = legacySchemaResult.rows
     }
   } else {
     return { ok: false, error: currentSchemaResult.error }
   }
 
-  const layerMap = new Map<string, LayerConfig>()
+  const metadataResult = await fetchLayerMetadataRows()
 
-  for (const row of rows) {
-    const feature = toFeature(row)
-    if (!feature) {
-      continue
-    }
-
-    const existingLayer = layerMap.get(row.layer_id)
-    if (!existingLayer) {
-      layerMap.set(row.layer_id, {
-        id: row.layer_id,
-        label: row.layer_label,
-        category: row.category,
-        sortOrder: row.layer_sort_order ?? 0,
-        features: [feature],
-      })
-      continue
-    }
-
-    if (
-      typeof row.layer_sort_order === 'number' &&
-      Number.isFinite(row.layer_sort_order)
-    ) {
-      existingLayer.sortOrder = Math.min(
-        existingLayer.sortOrder ?? row.layer_sort_order,
-        row.layer_sort_order,
-      )
-    }
-
-    existingLayer.features.push(feature)
+  if (metadataResult.ok) {
+    const layers = buildLayersFromRowsWithMetadata(featureRows, metadataResult.rows)
+    return { ok: true, layers }
   }
 
-  const layers = Array.from(layerMap.values()).sort((a, b) => {
-    const byCategory = a.category.localeCompare(b.category, 'fr')
-    if (byCategory !== 0) {
-      return byCategory
-    }
-    const leftSort = a.sortOrder ?? Number.MAX_SAFE_INTEGER
-    const rightSort = b.sortOrder ?? Number.MAX_SAFE_INTEGER
-    if (leftSort !== rightSort) {
-      return leftSort - rightSort
-    }
-    return a.label.localeCompare(b.label, 'fr')
-  })
+  if (metadataResult.missingSchema) {
+    const layers = buildLayersFromFeatureRows(featureRows)
+    return { ok: true, layers }
+  }
 
-  return { ok: true, layers }
+  return { ok: false, error: metadataResult.error }
 }
