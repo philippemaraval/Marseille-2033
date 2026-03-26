@@ -2654,6 +2654,25 @@
   flex: 0 0 auto;
 }
 
+.map-toolbar-collapsible > summary {
+  list-style: none;
+}
+
+.map-toolbar-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-toolbar-collapsible-content {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.map-toolbar-advanced > summary {
+  width: 100%;
+  text-align: left;
+}
+
 .app-shell .map-pane > .map-toolbar.is-collapsed {
   width: auto;
   max-width: min(220px, calc(100% - 24px));

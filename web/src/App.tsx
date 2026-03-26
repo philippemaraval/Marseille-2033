@@ -9382,69 +9382,73 @@ function App() {
                 ? `Création ${DRAW_GEOMETRY_LABELS[createDraft.geometry]}`
                 : ADMIN_MODE_LABELS[adminMode]}
             </p>
-            <p className="map-toolbar-shortcuts">
-              Raccourcis: 1/2/3, E, D, R, Z, M, G, X, P, ?, Shift+clic, Entrer, Retour, Esc, Ctrl/Cmd+Z/Y
-            </p>
             <div className="map-toolbar-actions map-toolbar-actions-inline">
               <button
                 type="button"
                 className="ghost-button mini-button"
                 onClick={() => setIsShortcutHelpOpen((current) => !current)}
               >
-                {isShortcutHelpOpen ? 'Fermer aide' : 'Aide raccourcis'}
+                {isShortcutHelpOpen ? 'Fermer aide' : 'Aide ?'}
               </button>
             </div>
 
             {adminMode === 'create' ? (
               <div className="map-toolbar-section">
-                <label className="map-toolbar-label">
-                  Nom rapide
-                  <input
-                    type="text"
-                    className="map-toolbar-input"
-                    value={createDraft.name}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                    placeholder="Nom (sinon automatique)"
-                  />
-                </label>
-                <div className="map-toolbar-row">
-                  <label className="map-toolbar-label small">
-                    Statut
-                    <select
-                      className="map-toolbar-select"
-                      value={createDraft.status}
-                      onChange={(event) =>
-                        setCreateDraft((current) => ({
-                          ...current,
-                          status: event.target.value as StatusId,
-                        }))
-                      }
-                    >
-                      <option value="existant">Existant</option>
-                      <option value="en cours">En cours</option>
-                      <option value="propose">Proposé</option>
-                    </select>
-                  </label>
-                  <label className="map-toolbar-label small">
-                    Couleur
-                    <input
-                      type="color"
-                      className="map-toolbar-color"
-                      value={createDraft.color}
-                      onChange={(event) =>
-                        setCreateDraft((current) => ({
-                          ...current,
-                          color: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
+                <details className="map-toolbar-collapsible">
+                  <summary className="ghost-button mini-button">
+                    Paramètres de création
+                  </summary>
+                  <div className="map-toolbar-collapsible-content">
+                    <label className="map-toolbar-label">
+                      Nom rapide
+                      <input
+                        type="text"
+                        className="map-toolbar-input"
+                        value={createDraft.name}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
+                        }
+                        placeholder="Nom (sinon automatique)"
+                      />
+                    </label>
+                    <div className="map-toolbar-row">
+                      <label className="map-toolbar-label small">
+                        Statut
+                        <select
+                          className="map-toolbar-select"
+                          value={createDraft.status}
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              status: event.target.value as StatusId,
+                            }))
+                          }
+                        >
+                          <option value="existant">Existant</option>
+                          <option value="en cours">En cours</option>
+                          <option value="propose">Proposé</option>
+                        </select>
+                      </label>
+                      <label className="map-toolbar-label small">
+                        Couleur
+                        <input
+                          type="color"
+                          className="map-toolbar-color"
+                          value={createDraft.color}
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              color: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </details>
                 <p className="map-toolbar-meta">
                   Points: {toolbarPointCount} / {toolbarMinPoints}
                 </p>
@@ -9515,9 +9519,6 @@ function App() {
                     <p className="map-toolbar-meta">
                       Sélection: <strong>{selectedFeature.feature.name}</strong>
                     </p>
-                    <p className="map-toolbar-meta">
-                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
-                    </p>
                     <div className="map-toolbar-actions">
                       <button
                         type="button"
@@ -9565,13 +9566,8 @@ function App() {
                         </button>
                       ) : null}
                     </div>
-                    {!isRedrawingEditGeometry ? (
-                      <p className="map-toolbar-meta">
-                        Astuce: glisse un sommet, clic sur + pour inserer, clic droit sur sommet pour supprimer.
-                      </p>
-                    ) : null}
                     <p className="map-toolbar-meta">
-                      Sélection multiple: Shift+clic ou clique-glisse avec "Sélection zone".
+                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
                     </p>
                     {isRedrawingEditGeometry ? (
                       <p className="map-toolbar-meta">
@@ -9609,9 +9605,6 @@ function App() {
                     <p className="map-toolbar-meta">
                       Sélection: <strong>{selectedFeature.feature.name}</strong>
                     </p>
-                    <p className="map-toolbar-meta">
-                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
-                    </p>
                     <div className="map-toolbar-actions">
                       <button
                         type="button"
@@ -9635,17 +9628,16 @@ function App() {
                       </button>
                     </div>
                     <p className="map-toolbar-meta">
-                      Shift+clic ajoute/retire un élément. Zone: clique-glisse.
+                      Multi-sélection: <strong>{selectedFeatureIds.length}</strong> élément(s)
                     </p>
                   </>
                 )}
               </div>
             ) : null}
 
-            <div className="map-toolbar-section">
-              <p className="map-toolbar-meta">
-                <strong>Outils avances</strong>
-              </p>
+            <details className="map-toolbar-section map-toolbar-collapsible map-toolbar-advanced">
+              <summary className="ghost-button mini-button">Outils avancés</summary>
+              <div className="map-toolbar-collapsible-content">
               <div className="map-toolbar-actions">
                 <button
                   type="button"
@@ -9740,15 +9732,15 @@ function App() {
                 </>
               ) : null}
 
-              <p className="map-toolbar-meta">
-                <strong>Style individuel</strong>
-              </p>
-              {!canEditStyleIndividually || !activeStyleDraft ? (
-                <p className="map-toolbar-meta">
-                  Sélectionne ou crée un élément pour régler son style.
-                </p>
-              ) : (
-                <>
+              <details className="map-toolbar-collapsible">
+                <summary className="ghost-button mini-button">Style individuel</summary>
+                <div className="map-toolbar-collapsible-content">
+                  {!canEditStyleIndividually || !activeStyleDraft ? (
+                    <p className="map-toolbar-meta">
+                      Sélectionne ou crée un élément pour régler son style.
+                    </p>
+                  ) : (
+                    <>
                   <label className="map-toolbar-label small">
                     Template
                     <select
@@ -10024,116 +10016,126 @@ function App() {
                       }
                     />
                   </label>
-                  <button
-                    type="button"
-                    className={`ghost-button mini-button${activeStyleDraft.labelHalo ? ' active' : ''}`}
-                    onClick={() =>
-                      applyStyleToCurrentDraft({
-                        labelHalo: !activeStyleDraft.labelHalo,
-                      })
-                    }
-                  >
-                    Halo label {activeStyleDraft.labelHalo ? 'ON' : 'OFF'}
-                  </button>
-                </>
-              )}
-
-              {isMeasureMode ? (
-                <>
-                  <label className="map-toolbar-label small">
-                    Type de mesure
-                    <select
-                      className="map-toolbar-select"
-                      value={measureGeometry}
-                      onChange={(event) =>
-                        handleChangeMeasureGeometry(event.target.value as MeasureGeometry)
-                      }
-                    >
-                      <option value="line">Distance</option>
-                      <option value="polygon">Surface</option>
-                    </select>
-                  </label>
-                  <p className="map-toolbar-meta">
-                    Mesure {MEASURE_GEOMETRY_LABELS[measureGeometry]}: {measurePoints.length}{' '}
-                    point(s)
-                  </p>
-                  {measureGeometry === 'line' ? (
-                    <p className="map-toolbar-meta">
-                      Distance: <strong>{formatDistance(measureLengthMeters)}</strong>
-                    </p>
-                  ) : (
-                    <>
-                      <p className="map-toolbar-meta">
-                        Perimetre: <strong>{formatDistance(measurePerimeterMeters)}</strong>
-                      </p>
-                      <p className="map-toolbar-meta">
-                        Surface: <strong>{formatSurface(measureAreaSquareMeters)}</strong>
-                      </p>
+                      <button
+                        type="button"
+                        className={`ghost-button mini-button${activeStyleDraft.labelHalo ? ' active' : ''}`}
+                        onClick={() =>
+                          applyStyleToCurrentDraft({
+                            labelHalo: !activeStyleDraft.labelHalo,
+                          })
+                        }
+                      >
+                        Halo label {activeStyleDraft.labelHalo ? 'ON' : 'OFF'}
+                      </button>
                     </>
                   )}
+                </div>
+              </details>
+
+              {isMeasureMode ? (
+                <details className="map-toolbar-collapsible" open>
+                  <summary className="ghost-button mini-button">Mesure</summary>
+                  <div className="map-toolbar-collapsible-content">
+                    <label className="map-toolbar-label small">
+                      Type de mesure
+                      <select
+                        className="map-toolbar-select"
+                        value={measureGeometry}
+                        onChange={(event) =>
+                          handleChangeMeasureGeometry(event.target.value as MeasureGeometry)
+                        }
+                      >
+                        <option value="line">Distance</option>
+                        <option value="polygon">Surface</option>
+                      </select>
+                    </label>
+                    <p className="map-toolbar-meta">
+                      Mesure {MEASURE_GEOMETRY_LABELS[measureGeometry]}: {measurePoints.length}{' '}
+                      point(s)
+                    </p>
+                    {measureGeometry === 'line' ? (
+                      <p className="map-toolbar-meta">
+                        Distance: <strong>{formatDistance(measureLengthMeters)}</strong>
+                      </p>
+                    ) : (
+                      <>
+                        <p className="map-toolbar-meta">
+                          Perimetre: <strong>{formatDistance(measurePerimeterMeters)}</strong>
+                        </p>
+                        <p className="map-toolbar-meta">
+                          Surface: <strong>{formatSurface(measureAreaSquareMeters)}</strong>
+                        </p>
+                      </>
+                    )}
+                    <div className="map-toolbar-actions">
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={handleToolbarUndoLastPoint}
+                        disabled={measurePoints.length === 0}
+                      >
+                        Annuler point
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button mini-button"
+                        onClick={handleResetMeasure}
+                        disabled={measurePoints.length === 0}
+                      >
+                        Réinitialiser
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              ) : null}
+
+              <details className="map-toolbar-collapsible">
+                <summary className="ghost-button mini-button">
+                  Historique (Ctrl/Cmd+Z | Ctrl/Cmd+Y)
+                </summary>
+                <div className="map-toolbar-collapsible-content">
                   <div className="map-toolbar-actions">
                     <button
                       type="button"
                       className="ghost-button mini-button"
-                      onClick={handleToolbarUndoLastPoint}
-                      disabled={measurePoints.length === 0}
+                      onClick={handleLocalUndo}
+                      disabled={!canLocalUndo}
                     >
-                      Annuler point
+                      Undo ({localHistoryPast.length})
                     </button>
                     <button
                       type="button"
                       className="ghost-button mini-button"
-                      onClick={handleResetMeasure}
-                      disabled={measurePoints.length === 0}
+                      onClick={handleLocalRedo}
+                      disabled={!canLocalRedo}
                     >
-                      Réinitialiser
+                      Redo ({localHistoryFuture.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={handleClearLocalHistory}
+                      disabled={!canLocalUndo && !canLocalRedo}
+                    >
+                      Effacer
                     </button>
                   </div>
-                </>
-              ) : null}
-
-              <p className="map-toolbar-meta">
-                <strong>Historique local</strong> (Ctrl/Cmd+Z | Ctrl/Cmd+Y)
-              </p>
-              <div className="map-toolbar-actions">
-                <button
-                  type="button"
-                  className="ghost-button mini-button"
-                  onClick={handleLocalUndo}
-                  disabled={!canLocalUndo}
-                >
-                  Undo ({localHistoryPast.length})
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button mini-button"
-                  onClick={handleLocalRedo}
-                  disabled={!canLocalRedo}
-                >
-                  Redo ({localHistoryFuture.length})
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button mini-button"
-                  onClick={handleClearLocalHistory}
-                  disabled={!canLocalUndo && !canLocalRedo}
-                >
-                  Effacer
-                </button>
+                  {visibleHistoryEntries.length > 0 ? (
+                    <ul className="map-history-list">
+                      {visibleHistoryEntries.map((entry) => (
+                        <li key={`${entry.createdAt}-${entry.label}`}>
+                          <span>{entry.label}</span>
+                          <time>{new Date(entry.createdAt).toLocaleTimeString('fr-FR')}</time>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="map-toolbar-meta">Aucune action locale.</p>
+                  )}
+                </div>
+              </details>
               </div>
-              {visibleHistoryEntries.length > 0 ? (
-                <ul className="map-history-list">
-                  {visibleHistoryEntries.map((entry) => (
-                    <li key={`${entry.createdAt}-${entry.label}`}>
-                      <span>{entry.label}</span>
-                      <time>{new Date(entry.createdAt).toLocaleTimeString('fr-FR')}</time>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="map-toolbar-meta">Aucune action locale.</p>
-              )}
-            </div>
+            </details>
               </>
             ) : null}
           </div>
