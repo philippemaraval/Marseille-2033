@@ -231,6 +231,9 @@ function isMissingLayerMetadataSchemaError(message: string): boolean {
     (normalized.includes('relation') &&
       normalized.includes('map_layers') &&
       normalized.includes('does not exist')) ||
+    (normalized.includes('could not find the table') &&
+      normalized.includes('map_layers') &&
+      normalized.includes('schema cache')) ||
     (normalized.includes('column') &&
       normalized.includes('section_sort_order') &&
       normalized.includes('does not exist'))
