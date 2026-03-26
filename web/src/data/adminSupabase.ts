@@ -488,19 +488,11 @@ export async function deleteLayerMetadata(
     return { ok: false, error: 'Supabase non configure.' }
   }
 
-  const { data: authData } = await supabase.auth.getUser()
-  const deletedBy = authData.user?.id ?? null
-  const deletedAt = new Date().toISOString()
-
   const { error: featureError } = await supabase
     .from('map_features')
-    .update({
-      deleted_at: deletedAt,
-      deleted_by: deletedBy,
-    })
+    .delete()
     .eq('category', category)
     .eq('layer_id', layerId)
-    .is('deleted_at', null)
 
   if (featureError) {
     return { ok: false, error: normalizeAdminError(featureError.message) }
@@ -560,18 +552,10 @@ export async function deleteLayerSection(
     return { ok: false, error: 'Supabase non configure.' }
   }
 
-  const { data: authData } = await supabase.auth.getUser()
-  const deletedBy = authData.user?.id ?? null
-  const deletedAt = new Date().toISOString()
-
   const { error: featureError } = await supabase
     .from('map_features')
-    .update({
-      deleted_at: deletedAt,
-      deleted_by: deletedBy,
-    })
+    .delete()
     .eq('category', category)
-    .is('deleted_at', null)
 
   if (featureError) {
     return { ok: false, error: normalizeAdminError(featureError.message) }

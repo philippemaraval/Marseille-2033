@@ -53,7 +53,7 @@ import {
   type ImportedGeometryFeature,
 } from './data/importExport'
 import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
-import { layerMeta, layers as fallbackLayers } from './data/layers'
+import { layers as fallbackLayers } from './data/layers'
 import { hasSupabase, supabase } from './lib/supabase'
 import type {
   FeatureStyle,
@@ -2155,10 +2155,6 @@ function makeLineArrowIcon(color: string, angle: number): DivIcon {
 
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
-  const [dataSource, setDataSource] = useState(layerMeta.mode)
-  const [sourceTimestamp, setSourceTimestamp] = useState(layerMeta.generatedAt)
-  const [dataNotice, setDataNotice] = useState<string | null>(null)
-  const [isSyncingSupabase, setIsSyncingSupabase] = useState(hasSupabase)
   const [layers, setLayers] = useState<LayerConfig[]>(fallbackLayers)
   const [activeLayers, setActiveLayers] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(fallbackLayers.map((layer) => [layer.id, false])),
@@ -2356,23 +2352,11 @@ function App() {
       if (!hasSupabase) {
         return
       }
-      setIsSyncingSupabase(true)
       const result = await fetchLayersFromSupabase()
 
       if (result.ok && result.layers.length > 0) {
         applyLoadedLayers(result.layers, forceActiveLayerId)
-        setDataSource('supabase')
-        setSourceTimestamp(new Date().toISOString())
-        setDataNotice(null)
-      } else if (result.ok) {
-        setDataSource(`${layerMeta.mode} (fallback)`)
-        setDataNotice('Supabase est configuré mais la table map_features est vide.')
-      } else {
-        setDataSource(`${layerMeta.mode} (fallback)`)
-        setDataNotice(`Erreur Supabase: ${result.error}`)
       }
-
-      setIsSyncingSupabase(false)
     },
     [applyLoadedLayers],
   )
@@ -6038,7 +6022,7 @@ function App() {
       }
 
       const confirmed = window.confirm(
-        `Supprimer le calque "${label}" ? Les éléments seront déplacés dans la corbeille.`,
+        `Supprimer définitivement le calque "${label}" ? Cette action est irréversible.`,
       )
       if (!confirmed) {
         return
@@ -6078,7 +6062,7 @@ function App() {
         setEditPoints([])
       }
       setIsSaving(false)
-      setAdminNotice(`Calque "${label}" supprimé.`)
+      setAdminNotice(`Calque "${label}" supprimé définitivement.`)
     },
     [
       featureById,
@@ -6233,7 +6217,7 @@ function App() {
       }
 
       const confirmed = window.confirm(
-        `Supprimer la section "${category}" ? Tous ses calques seront supprimés et les éléments envoyés en corbeille.`,
+        `Supprimer définitivement la section "${category}" et tous ses calques ? Cette action est irréversible.`,
       )
       if (!confirmed) {
         return
@@ -6269,7 +6253,7 @@ function App() {
         setEditPoints([])
       }
       setIsSaving(false)
-      setAdminNotice(`Section "${category}" supprimée.`)
+      setAdminNotice(`Section "${category}" supprimée définitivement.`)
     },
     [
       featureById,
@@ -7542,13 +7526,7 @@ function App() {
             </button>
           </div>
 
-          <p className="intro">
-            Donnees source: {dataSource} ({sourceTimestamp})
-          </p>
-          {isSyncingSupabase ? (
-            <p className="muted">Synchronisation Supabase en cours...</p>
-          ) : null}
-          {dataNotice ? <p className="muted">{dataNotice}</p> : null}
+          <p className="intro">Données source: Supabase</p>
         </header>
 
         <div className="sidebar-tabs" role="tablist" aria-label="Navigation panneau">
