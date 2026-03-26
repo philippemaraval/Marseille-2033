@@ -70,6 +70,7 @@ import type {
 import './App.css'
 
 type BaseMapId = 'osm' | 'satellite' | 'carto_light' | 'carto_dark' | 'topo'
+type SidebarTabId = 'calques' | 'carte' | 'outils'
 type DrawGeometry = GeometryFeature['geometry']
 type AdminMode = 'view' | 'create' | 'edit' | 'delete'
 type VisibleFeatureSortMode = 'alpha' | 'status' | 'layer' | 'category'
@@ -2193,6 +2194,7 @@ function App() {
     LayerVisibilityPreset[]
   >([])
 
+  const [sidebarTab, setSidebarTab] = useState<SidebarTabId>('calques')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [showDebugInfo, setShowDebugInfo] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabase)
@@ -7531,7 +7533,10 @@ function App() {
             <button
               type="button"
               className="ghost-button"
-              onClick={() => setIsAdminPanelOpen((current) => !current)}
+              onClick={() => {
+                setIsAdminPanelOpen((current) => !current)
+                setSidebarTab('outils')
+              }}
             >
               Admin
             </button>
@@ -7546,7 +7551,37 @@ function App() {
           {dataNotice ? <p className="muted">{dataNotice}</p> : null}
         </header>
 
-        {isAdminPanelOpen ? (
+        <div className="sidebar-tabs" role="tablist" aria-label="Navigation panneau">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === 'calques'}
+            className={`sidebar-tab${sidebarTab === 'calques' ? ' active' : ''}`}
+            onClick={() => setSidebarTab('calques')}
+          >
+            Calques
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === 'carte'}
+            className={`sidebar-tab${sidebarTab === 'carte' ? ' active' : ''}`}
+            onClick={() => setSidebarTab('carte')}
+          >
+            Carte
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === 'outils'}
+            className={`sidebar-tab${sidebarTab === 'outils' ? ' active' : ''}`}
+            onClick={() => setSidebarTab('outils')}
+          >
+            Outils
+          </button>
+        </div>
+
+        {isAdminPanelOpen && sidebarTab === 'outils' ? (
           <section className="panel-block admin-panel">
             <div className="admin-title-row">
               <h2>Mode admin</h2>
@@ -8492,107 +8527,112 @@ function App() {
           </section>
         ) : null}
 
-        <section className="panel-block">
-          <h2>Fond de carte</h2>
-          <div className="radio-grid">
-            {(Object.entries(BASE_MAPS) as [BaseMapId, BaseMapConfig][]).map(
-              ([id, map]) => (
-                <label key={id} className="control-row">
-                  <input
-                    type="radio"
-                    name="base-map"
-                    checked={baseMapId === id}
-                    onChange={() => setBaseMapId(id)}
-                  />
-                  <span>{map.label}</span>
-                </label>
-              ),
-            )}
-          </div>
-        </section>
+        {sidebarTab === 'carte' ? (
+          <section className="panel-block">
+            <h2>Fond de carte</h2>
+            <div className="radio-grid">
+              {(Object.entries(BASE_MAPS) as [BaseMapId, BaseMapConfig][]).map(
+                ([id, map]) => (
+                  <label key={id} className="control-row">
+                    <input
+                      type="radio"
+                      name="base-map"
+                      checked={baseMapId === id}
+                      onChange={() => setBaseMapId(id)}
+                    />
+                    <span>{map.label}</span>
+                  </label>
+                ),
+              )}
+            </div>
+          </section>
+        ) : null}
 
-        <section className="panel-block">
-          <h2>Filtres</h2>
-          <div className="filters-grid">
-            <label>
-              Statut
-              <select
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as StatusId | 'all')
-                }
+        {sidebarTab === 'carte' ? (
+          <section className="panel-block">
+            <h2>Filtres</h2>
+            <div className="filters-grid">
+              <label>
+                Statut
+                <select
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(event.target.value as StatusId | 'all')
+                  }
+                >
+                  <option value="all">Tous</option>
+                  <option value="existant">Existant</option>
+                  <option value="en cours">En cours</option>
+                  <option value="propose">Proposé</option>
+                </select>
+              </label>
+
+              <label>
+                Catégorie
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                >
+                  <option value="all">Toutes</option>
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Géométrie
+                <select
+                  value={geometryFilter}
+                  onChange={(event) =>
+                    setGeometryFilter(event.target.value as DrawGeometry | 'all')
+                  }
+                >
+                  <option value="all">Toutes</option>
+                  <option value="point">Points</option>
+                  <option value="line">Lignes</option>
+                  <option value="polygon">Polygones</option>
+                </select>
+              </label>
+            </div>
+            <div className="status-chip-grid">
+              <button
+                type="button"
+                className={`ghost-button mini-button${statusFilter === 'all' ? ' active' : ''}`}
+                onClick={() => setStatusFilter('all')}
               >
-                <option value="all">Tous</option>
-                <option value="existant">Existant</option>
-                <option value="en cours">En cours</option>
-                <option value="propose">Proposé</option>
-              </select>
-            </label>
-
-            <label>
-              Catégorie
-              <select
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
+                Tous ({statusQuickCounts.all})
+              </button>
+              <button
+                type="button"
+                className={`ghost-button mini-button${statusFilter === 'existant' ? ' active' : ''}`}
+                onClick={() => setStatusFilter('existant')}
               >
-                <option value="all">Toutes</option>
-                {categories.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Géométrie
-              <select
-                value={geometryFilter}
-                onChange={(event) =>
-                  setGeometryFilter(event.target.value as DrawGeometry | 'all')
-                }
+                Existant ({statusQuickCounts.existant})
+              </button>
+              <button
+                type="button"
+                className={`ghost-button mini-button${statusFilter === 'en cours' ? ' active' : ''}`}
+                onClick={() => setStatusFilter('en cours')}
               >
-                <option value="all">Toutes</option>
-                <option value="point">Points</option>
-                <option value="line">Lignes</option>
-                <option value="polygon">Polygones</option>
-              </select>
-            </label>
-          </div>
-          <div className="status-chip-grid">
-            <button
-              type="button"
-              className={`ghost-button mini-button${statusFilter === 'all' ? ' active' : ''}`}
-              onClick={() => setStatusFilter('all')}
-            >
-              Tous ({statusQuickCounts.all})
-            </button>
-            <button
-              type="button"
-              className={`ghost-button mini-button${statusFilter === 'existant' ? ' active' : ''}`}
-              onClick={() => setStatusFilter('existant')}
-            >
-              Existant ({statusQuickCounts.existant})
-            </button>
-            <button
-              type="button"
-              className={`ghost-button mini-button${statusFilter === 'en cours' ? ' active' : ''}`}
-              onClick={() => setStatusFilter('en cours')}
-            >
-              En cours ({statusQuickCounts['en cours']})
-            </button>
-            <button
-              type="button"
-              className={`ghost-button mini-button${statusFilter === 'propose' ? ' active' : ''}`}
-              onClick={() => setStatusFilter('propose')}
-            >
-              Proposé ({statusQuickCounts.propose})
-            </button>
-          </div>
-        </section>
+                En cours ({statusQuickCounts['en cours']})
+              </button>
+              <button
+                type="button"
+                className={`ghost-button mini-button${statusFilter === 'propose' ? ' active' : ''}`}
+                onClick={() => setStatusFilter('propose')}
+              >
+                Proposé ({statusQuickCounts.propose})
+              </button>
+            </div>
+          </section>
+        ) : null}
 
-        <section className="panel-block">
-          <h2>Navigation carte</h2>
+        {sidebarTab === 'carte' ? (
+          <section className="panel-block">
+            <h2>Navigation carte</h2>
           <div className="admin-actions-row">
             <button
               type="button"
@@ -8732,10 +8772,12 @@ function App() {
               ))}
             </ul>
           )}
-        </section>
+          </section>
+        ) : null}
 
-        <section className="panel-block">
-          <h2>Calques</h2>
+        {sidebarTab === 'calques' ? (
+          <section className="panel-block">
+            <h2>Calques</h2>
           <div className="admin-actions-row">
             <button
               type="button"
@@ -8751,44 +8793,49 @@ function App() {
             >
               Tout désactiver
             </button>
-            <button
-              type="button"
-              className="ghost-button mini-button"
-              onClick={handleExpandAllLayerFolders}
-            >
-              Déplier catégories
-            </button>
-            <button
-              type="button"
-              className="ghost-button mini-button"
-              onClick={handleCollapseAllLayerFolders}
-            >
-              Replier catégories
-            </button>
-            {isAdmin ? (
-              <>
+            <details className="inline-actions-menu">
+              <summary className="ghost-button mini-button">Plus</summary>
+              <div className="inline-actions-menu-content">
                 <button
                   type="button"
                   className="ghost-button mini-button"
-                  onClick={() => void handleCreateLayer()}
-                  disabled={isSaving}
+                  onClick={handleExpandAllLayerFolders}
                 >
-                  Nouveau calque
+                  Déplier catégories
                 </button>
                 <button
                   type="button"
                   className="ghost-button mini-button"
-                  onClick={() =>
-                    void handleCreateLayer({
-                      requireNewSection: true,
-                    })
-                  }
-                  disabled={isSaving}
+                  onClick={handleCollapseAllLayerFolders}
                 >
-                  Nouvelle section
+                  Replier catégories
                 </button>
-              </>
-            ) : null}
+                {isAdmin ? (
+                  <>
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={() => void handleCreateLayer()}
+                      disabled={isSaving}
+                    >
+                      Nouveau calque
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={() =>
+                        void handleCreateLayer({
+                          requireNewSection: true,
+                        })
+                      }
+                      disabled={isSaving}
+                    >
+                      Nouvelle section
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </details>
           </div>
           <div className="layer-preset-tools">
             <label>
@@ -8874,55 +8921,58 @@ function App() {
                     </small>
                   </button>
                   {isAdmin ? (
-                    <div className="layer-folder-actions">
-                      <button
-                        type="button"
-                        className="ghost-button mini-button"
-                        onClick={() =>
-                          void handleCreateLayer({ presetCategory: block.category })
-                        }
-                        disabled={isSaving}
-                        title="Créer un calque dans cette section"
-                      >
-                        + calque
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button mini-button"
-                        onClick={() => void handleRenameSection(block.category)}
-                        disabled={isSaving}
-                        title="Renommer la section"
-                      >
-                        Ren.
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button mini-button"
-                        onClick={() => void handleMoveSection(block.category, 'up')}
-                        disabled={isSaving || isFirstSection}
-                        title="Monter la section"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button mini-button"
-                        onClick={() => void handleMoveSection(block.category, 'down')}
-                        disabled={isSaving || isLastSection}
-                        title="Descendre la section"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="danger-button mini-button"
-                        onClick={() => void handleDeleteSection(block.category)}
-                        disabled={isSaving}
-                        title="Supprimer la section"
-                      >
-                        Suppr.
-                      </button>
-                    </div>
+                    <details className="layer-folder-actions">
+                      <summary className="ghost-button mini-button">Actions</summary>
+                      <div className="layer-actions-menu">
+                        <button
+                          type="button"
+                          className="ghost-button mini-button"
+                          onClick={() =>
+                            void handleCreateLayer({ presetCategory: block.category })
+                          }
+                          disabled={isSaving}
+                          title="Créer un calque dans cette section"
+                        >
+                          + calque
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button mini-button"
+                          onClick={() => void handleRenameSection(block.category)}
+                          disabled={isSaving}
+                          title="Renommer la section"
+                        >
+                          Renommer
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button mini-button"
+                          onClick={() => void handleMoveSection(block.category, 'up')}
+                          disabled={isSaving || isFirstSection}
+                          title="Monter la section"
+                        >
+                          Monter
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button mini-button"
+                          onClick={() => void handleMoveSection(block.category, 'down')}
+                          disabled={isSaving || isLastSection}
+                          title="Descendre la section"
+                        >
+                          Descendre
+                        </button>
+                        <button
+                          type="button"
+                          className="danger-button mini-button"
+                          onClick={() => void handleDeleteSection(block.category)}
+                          disabled={isSaving}
+                          title="Supprimer la section"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    </details>
                   ) : null}
                 </div>
                 {collapsedLayerFolders[block.category]
@@ -8960,268 +9010,286 @@ function App() {
                             élément(s) avec filtres
                           </p>
                           {isAdmin ? (
-                            <div className="layer-order-actions">
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() => handleSoloLayer(block.category, layer.id)}
-                                title="Activer uniquement ce calque"
-                              >
-                                Solo
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() => handleFitLayer(block.category, layer.id)}
-                                title="Cadrer ce calque"
-                              >
-                                Zoom
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() => toggleLayerLock(block.category, layer.id)}
-                                disabled={isSaving}
-                                title={layerLocked ? 'Déverrouiller' : 'Verrouiller'}
-                              >
-                                {layerLocked ? 'Deverr.' : 'Verrou.'}
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() =>
-                                  void handleRenameLayer(
-                                    block.category,
-                                    layer.id,
-                                    layer.label,
-                                  )
-                                }
-                                disabled={isSaving || layerLocked}
-                                title="Renommer le calque"
-                              >
-                                Ren.
-                              </button>
-                              <button
-                                type="button"
-                                className="danger-button mini-button"
-                                onClick={() =>
-                                  void handleDeleteLayer(
-                                    block.category,
-                                    layer.id,
-                                    layer.label,
-                                  )
-                                }
-                                disabled={isSaving || layerLocked}
-                                title="Supprimer le calque"
-                              >
-                                Suppr.
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() =>
-                                  void handleDuplicateLayer(block.category, layer.id)
-                                }
-                                disabled={isSaving || layerLocked}
-                                title="Dupliquer le calque"
-                              >
-                                Dupl.
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() =>
-                                  void handleMoveLayer(block.category, layer.id, 'up')
-                                }
-                                disabled={isSaving || index === 0}
-                                title="Monter"
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-button mini-button"
-                                onClick={() =>
-                                  void handleMoveLayer(block.category, layer.id, 'down')
-                                }
-                                disabled={isSaving || index === block.layers.length - 1}
-                                title="Descendre"
-                              >
-                                ↓
-                              </button>
-                            </div>
+                            <details className="layer-row-actions">
+                              <summary className="ghost-button mini-button">Actions</summary>
+                              <div className="layer-actions-menu">
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() => handleSoloLayer(block.category, layer.id)}
+                                  title="Activer uniquement ce calque"
+                                >
+                                  Solo
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() => handleFitLayer(block.category, layer.id)}
+                                  title="Cadrer ce calque"
+                                >
+                                  Cadrer
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() => toggleLayerLock(block.category, layer.id)}
+                                  disabled={isSaving}
+                                  title={layerLocked ? 'Déverrouiller' : 'Verrouiller'}
+                                >
+                                  {layerLocked ? 'Déverr.' : 'Verrou.'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    void handleRenameLayer(
+                                      block.category,
+                                      layer.id,
+                                      layer.label,
+                                    )
+                                  }
+                                  disabled={isSaving || layerLocked}
+                                  title="Renommer le calque"
+                                >
+                                  Renommer
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    void handleDuplicateLayer(block.category, layer.id)
+                                  }
+                                  disabled={isSaving || layerLocked}
+                                  title="Dupliquer le calque"
+                                >
+                                  Dupliquer
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    void handleMoveLayer(block.category, layer.id, 'up')
+                                  }
+                                  disabled={isSaving || index === 0}
+                                  title="Monter"
+                                >
+                                  Monter
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    void handleMoveLayer(block.category, layer.id, 'down')
+                                  }
+                                  disabled={isSaving || index === block.layers.length - 1}
+                                  title="Descendre"
+                                >
+                                  Descendre
+                                </button>
+                                <button
+                                  type="button"
+                                  className="danger-button mini-button"
+                                  onClick={() =>
+                                    void handleDeleteLayer(
+                                      block.category,
+                                      layer.id,
+                                      layer.label,
+                                    )
+                                  }
+                                  disabled={isSaving || layerLocked}
+                                  title="Supprimer le calque"
+                                >
+                                  Supprimer
+                                </button>
+                              </div>
+                            </details>
                           ) : null}
-                          <div className="layer-zoom-controls">
-                            <label>
-                              min
-                              <input
-                                type="number"
-                                min={10}
-                                max={18}
-                                step={1}
-                                value={zoomRule.minZoom}
-                                onChange={(event) =>
-                                  handleLayerZoomChange(
-                                    block.category,
-                                    layer.id,
-                                    'minZoom',
-                                    Number.parseInt(event.target.value || '10', 10),
-                                  )
-                                }
-                              />
-                            </label>
-                            <label>
-                              max
-                              <input
-                                type="number"
-                                min={10}
-                                max={18}
-                                step={1}
-                                value={zoomRule.maxZoom}
-                                onChange={(event) =>
-                                  handleLayerZoomChange(
-                                    block.category,
-                                    layer.id,
-                                    'maxZoom',
-                                    Number.parseInt(event.target.value || '18', 10),
-                                  )
-                                }
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() => handleResetLayerZoom(block.category, layer.id)}
-                              disabled={!hasCustomZoomRule}
-                              title="Réinitialiser min/max zoom"
-                            >
-                              Auto
-                            </button>
-                          </div>
-                          <div className="layer-opacity-controls">
-                            <label>
-                              Opacite {Math.round(layerOpacity * 100)}%
-                              <input
-                                type="range"
-                                min={15}
-                                max={100}
-                                step={5}
-                                value={Math.round(layerOpacity * 100)}
-                                onChange={(event) =>
-                                  handleLayerOpacityChange(
-                                    block.category,
-                                    layer.id,
-                                    Number.parseInt(event.target.value || '100', 10) / 100,
-                                  )
-                                }
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              className="ghost-button mini-button"
-                              onClick={() => handleResetLayerOpacity(block.category, layer.id)}
-                              disabled={!hasCustomOpacity}
-                              title="Réinitialiser opacité du calque"
-                            >
-                              100%
-                            </button>
-                          </div>
+                          <details className="layer-display-details">
+                            <summary className="ghost-button mini-button">
+                              Affichage avancé
+                            </summary>
+                            <div className="layer-display-details-content">
+                              <div className="layer-zoom-controls">
+                                <label>
+                                  min
+                                  <input
+                                    type="number"
+                                    min={10}
+                                    max={18}
+                                    step={1}
+                                    value={zoomRule.minZoom}
+                                    onChange={(event) =>
+                                      handleLayerZoomChange(
+                                        block.category,
+                                        layer.id,
+                                        'minZoom',
+                                        Number.parseInt(event.target.value || '10', 10),
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  max
+                                  <input
+                                    type="number"
+                                    min={10}
+                                    max={18}
+                                    step={1}
+                                    value={zoomRule.maxZoom}
+                                    onChange={(event) =>
+                                      handleLayerZoomChange(
+                                        block.category,
+                                        layer.id,
+                                        'maxZoom',
+                                        Number.parseInt(event.target.value || '18', 10),
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    handleResetLayerZoom(block.category, layer.id)
+                                  }
+                                  disabled={!hasCustomZoomRule}
+                                  title="Réinitialiser min/max zoom"
+                                >
+                                  Auto
+                                </button>
+                              </div>
+                              <div className="layer-opacity-controls">
+                                <label>
+                                  Opacite {Math.round(layerOpacity * 100)}%
+                                  <input
+                                    type="range"
+                                    min={15}
+                                    max={100}
+                                    step={5}
+                                    value={Math.round(layerOpacity * 100)}
+                                    onChange={(event) =>
+                                      handleLayerOpacityChange(
+                                        block.category,
+                                        layer.id,
+                                        Number.parseInt(event.target.value || '100', 10) /
+                                          100,
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    handleResetLayerOpacity(block.category, layer.id)
+                                  }
+                                  disabled={!hasCustomOpacity}
+                                  title="Réinitialiser opacité du calque"
+                                >
+                                  100%
+                                </button>
+                              </div>
+                            </div>
+                          </details>
                         </div>
                       )
                     })}
               </div>
             )
           })}
-        </section>
+          </section>
+        ) : null}
 
-        <section className="panel-block legend-block">
-          <h2>Legende dynamique</h2>
-          {visibleStatuses.length === 0 ? (
-            <p className="muted">Aucun statut visible.</p>
-          ) : (
-            <ul className="legend-list">
-              {visibleStatuses.map((status) => (
-                <li key={status}>
-                  <span
-                    className="legend-dot"
-                    style={{ backgroundColor: STATUS_COLORS[status] }}
-                    aria-hidden="true"
+        {sidebarTab === 'calques' ? (
+          <>
+            <section className="panel-block legend-block">
+              <h2>Legende dynamique</h2>
+              {visibleStatuses.length === 0 ? (
+                <p className="muted">Aucun statut visible.</p>
+              ) : (
+                <ul className="legend-list">
+                  {visibleStatuses.map((status) => (
+                    <li key={status}>
+                      <span
+                        className="legend-dot"
+                        style={{ backgroundColor: STATUS_COLORS[status] }}
+                        aria-hidden="true"
+                      />
+                      <span>{STATUS_LABELS[status]}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="panel-block visible-list-block">
+              <h2>Elements visibles ({mapVisibleFeatureEntries.length})</h2>
+              <div className="filters-grid">
+                <label>
+                  Recherche rapide
+                  <input
+                    type="text"
+                    value={featureSearchQuery}
+                    onChange={(event) => setFeatureSearchQuery(event.target.value)}
+                    placeholder="Nom, calque, catégorie..."
                   />
-                  <span>{STATUS_LABELS[status]}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="panel-block visible-list-block">
-          <h2>Elements visibles ({mapVisibleFeatureEntries.length})</h2>
-          <div className="filters-grid">
-            <label>
-              Recherche rapide
-              <input
-                type="text"
-                value={featureSearchQuery}
-                onChange={(event) => setFeatureSearchQuery(event.target.value)}
-                placeholder="Nom, calque, catégorie..."
-              />
-            </label>
-            <label>
-              Tri
-              <select
-                value={featureSortMode}
-                onChange={(event) =>
-                  setFeatureSortMode(event.target.value as VisibleFeatureSortMode)
-                }
-              >
-                <option value="alpha">Alphabétique</option>
-                <option value="status">Par statut</option>
-                <option value="layer">Par calque</option>
-                <option value="category">Par catégorie</option>
-              </select>
-            </label>
-          </div>
-          <p className="muted">
-            {visibleFeatures.length} resultat(s)
-            {featureSearchQuery.trim()
-              ? ` pour "${featureSearchQuery.trim()}"`
-              : ''}
-          </p>
-          {visibleFeatures.length === 0 ? (
-            <p className="muted">
-              {mapVisibleFeatureEntries.length === 0
-                ? 'Active un calque pour commencer.'
-                : 'Aucun élément ne correspond à la recherche.'}
-            </p>
-          ) : (
-            <ul className="feature-list">
-              {visibleFeatures.map((feature) => (
-                <li key={feature.id}>
-                  <button
-                    type="button"
-                    className="feature-list-item-button"
-                    onClick={() => handleVisibleFeatureFocus(feature.id)}
-                    title="Zoomer sur cet élément"
+                </label>
+                <label>
+                  Tri
+                  <select
+                    value={featureSortMode}
+                    onChange={(event) =>
+                      setFeatureSortMode(event.target.value as VisibleFeatureSortMode)
+                    }
                   >
-                    <span
-                      className="legend-dot"
-                      style={{ backgroundColor: feature.color }}
-                      aria-hidden="true"
-                    />
-                    <div>
-                      <strong>{feature.name}</strong>
-                      <p>
-                        {feature.layerLabel} | {feature.category} |{' '}
-                        {STATUS_LABELS[feature.status]} |{' '}
-                        {DRAW_GEOMETRY_LABELS[feature.geometry]}
-                      </p>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                    <option value="alpha">Alphabétique</option>
+                    <option value="status">Par statut</option>
+                    <option value="layer">Par calque</option>
+                    <option value="category">Par catégorie</option>
+                  </select>
+                </label>
+              </div>
+              <p className="muted">
+                {visibleFeatures.length} resultat(s)
+                {featureSearchQuery.trim() ? ` pour "${featureSearchQuery.trim()}"` : ''}
+              </p>
+              {visibleFeatures.length === 0 ? (
+                <p className="muted">
+                  {mapVisibleFeatureEntries.length === 0
+                    ? 'Active un calque pour commencer.'
+                    : 'Aucun élément ne correspond à la recherche.'}
+                </p>
+              ) : (
+                <ul className="feature-list">
+                  {visibleFeatures.map((feature) => (
+                    <li key={feature.id}>
+                      <button
+                        type="button"
+                        className="feature-list-item-button"
+                        onClick={() => handleVisibleFeatureFocus(feature.id)}
+                        title="Zoomer sur cet élément"
+                      >
+                        <span
+                          className="legend-dot"
+                          style={{ backgroundColor: feature.color }}
+                          aria-hidden="true"
+                        />
+                        <div>
+                          <strong>{feature.name}</strong>
+                          <p>
+                            {feature.layerLabel} | {feature.category} |{' '}
+                            {STATUS_LABELS[feature.status]} |{' '}
+                            {DRAW_GEOMETRY_LABELS[feature.geometry]}
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        ) : null}
         </aside>
       ) : null}
 
