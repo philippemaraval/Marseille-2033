@@ -752,6 +752,23 @@ function appendPreviewPoint(
   return [...points, previewPoint]
 }
 
+function resolvePointsForFinish(
+  geometry: DrawGeometry,
+  points: LatLngTuple[],
+  previewPoint: LatLngTuple | null,
+): LatLngTuple[] {
+  if (isGeometryComplete(geometry, points)) {
+    return points
+  }
+
+  const withPreview = appendPreviewPoint(points, previewPoint)
+  if (isGeometryComplete(geometry, withPreview)) {
+    return withPreview
+  }
+
+  return points
+}
+
 function normalizeLabelSize(value: number): number {
   return Math.round(Math.max(10, Math.min(24, value)))
 }
@@ -3218,6 +3235,11 @@ function App() {
     return snapPreview?.position ?? cursorPosition
   }, [cursorPosition, isAdmin, isZoneSelectionMode, snapPreview])
 
+  const createPointsForFinish = useMemo(
+    () => resolvePointsForFinish(createDraft.geometry, createPoints, draftPreviewPoint),
+    [createDraft.geometry, createPoints, draftPreviewPoint],
+  )
+
   const layerSuggestions = useMemo(
     () =>
       layers
@@ -4536,12 +4558,13 @@ function App() {
     setAdminNotice('Mode admin désactivé.')
   }
 
-  const handleCreateFeature = useCallback(async () => {
+  const handleCreateFeature = useCallback(async (pointsOverride?: LatLngTuple[]) => {
     if (!supabase || !isAdmin) {
       setAdminNotice('Connexion admin requise.')
       return
     }
 
+    const pointsToPersist = pointsOverride ?? createPoints
     const layerId = toLayerId(createDraft.layerId, createDraft.layerLabel)
     const layerLabel = createDraft.layerLabel.trim()
     const category = createDraft.category.trim()
@@ -4566,13 +4589,13 @@ function App() {
       return
     }
 
-    if (!isGeometryComplete(createDraft.geometry, createPoints)) {
+    if (!isGeometryComplete(createDraft.geometry, pointsToPersist)) {
       setAdminNotice('Géométrie incomplète: ajoute plus de points sur la carte.')
       return
     }
 
-    const geometryPointsSnapshot = [...createPoints]
-    const geometryCoordinates = toCoordinates(createDraft.geometry, createPoints)
+    const geometryPointsSnapshot = [...pointsToPersist]
+    const geometryCoordinates = toCoordinates(createDraft.geometry, pointsToPersist)
     const stylePayload = toFeatureStylePayload(createDraft.geometry, createDraft)
     const existingLayer = layers.find(
       (layer) => layer.id === layerId && layer.category === category,
@@ -5460,13 +5483,13 @@ function App() {
     }
 
     if (adminMode === 'create') {
-      if (!isGeometryComplete(createDraft.geometry, createPoints)) {
+      if (!isGeometryComplete(createDraft.geometry, createPointsForFinish)) {
         setAdminNotice(
           `Géométrie incomplète: ${MIN_POINTS_REQUIRED[createDraft.geometry]} point(s) minimum.`,
         )
         return
       }
-      void handleCreateFeature()
+      void handleCreateFeature(createPointsForFinish)
       return
     }
 
@@ -5698,7 +5721,7 @@ function App() {
 
   const handleToolbarPrimaryAction = useCallback(() => {
     if (adminMode === 'create') {
-      void handleCreateFeature()
+      void handleCreateFeature(createPointsForFinish)
       return
     }
     if (adminMode === 'edit' && selectedFeatureId && editDraft) {
@@ -5713,6 +5736,7 @@ function App() {
     }
   }, [
     adminMode,
+    createPointsForFinish,
     editDraft,
     handleCreateFeature,
     handleDeleteFeature,
@@ -6729,7 +6753,7 @@ function App() {
       if (event.key === 'Enter') {
         if (
           adminMode === 'create' &&
-          isGeometryComplete(createDraft.geometry, createPoints)
+          isGeometryComplete(createDraft.geometry, createPointsForFinish)
         ) {
           event.preventDefault()
           handleToolbarPrimaryAction()
@@ -6824,6 +6848,7 @@ function App() {
   }, [
     adminMode,
     createDraft.geometry,
+    createPointsForFinish,
     createPoints,
     editDraft,
     editPoints,
@@ -7401,7 +7426,7 @@ function App() {
         : false
   const toolbarCanConfirm =
     adminMode === 'create'
-      ? isGeometryComplete(createDraft.geometry, createPoints)
+      ? isGeometryComplete(createDraft.geometry, createPointsForFinish)
       : adminMode === 'edit' && editDraft
         ? isRedrawingEditGeometry
           ? isGeometryComplete(editDraft.geometry, editPoints)
@@ -8103,7 +8128,7 @@ function App() {
                       type="button"
                       className="solid-button"
                       disabled={isSaving}
-                      onClick={handleCreateFeature}
+                      onClick={() => void handleCreateFeature(createPointsForFinish)}
                     >
                       {isSaving ? 'Sauvegarde...' : 'Créer l\'élément'}
                     </button>
