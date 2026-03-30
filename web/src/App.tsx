@@ -738,6 +738,20 @@ function normalizeLayerOpacity(value: number): number {
   return Math.round(clamp(value, 0.15, 1) * 100) / 100
 }
 
+function appendPreviewPoint(
+  points: LatLngTuple[],
+  previewPoint: LatLngTuple | null,
+): LatLngTuple[] {
+  if (!previewPoint || points.length === 0) {
+    return points
+  }
+  const last = points[points.length - 1]
+  if (last[0] === previewPoint[0] && last[1] === previewPoint[1]) {
+    return points
+  }
+  return [...points, previewPoint]
+}
+
 function normalizeLabelSize(value: number): number {
   return Math.round(Math.max(10, Math.min(24, value)))
 }
@@ -3197,6 +3211,13 @@ function App() {
     return normalizeBounds(zoneSelectionStart, zoneSelectionCurrent)
   }, [zoneSelectionCurrent, zoneSelectionStart])
 
+  const draftPreviewPoint = useMemo<LatLngTuple | null>(() => {
+    if (!isAdmin || isZoneSelectionMode) {
+      return null
+    }
+    return snapPreview?.position ?? cursorPosition
+  }, [cursorPosition, isAdmin, isZoneSelectionMode, snapPreview])
+
   const layerSuggestions = useMemo(
     () =>
       layers
@@ -3311,6 +3332,11 @@ function App() {
     }
     return computePolygonArea(measurePoints)
   }, [measureGeometry, measurePoints])
+
+  const measurePreviewPoints = useMemo(
+    () => appendPreviewPoint(measurePoints, draftPreviewPoint),
+    [draftPreviewPoint, measurePoints],
+  )
 
   const gridLines = useMemo(() => {
     if (!isGridEnabled || !mapViewport) {
@@ -6853,6 +6879,8 @@ function App() {
     }
 
     if (adminMode === 'create' && createPoints.length > 0) {
+      const createPreviewPoints = appendPreviewPoint(createPoints, draftPreviewPoint)
+
       if (createDraft.geometry === 'point') {
         return (
           <CircleMarker
@@ -6871,7 +6899,7 @@ function App() {
       if (createDraft.geometry === 'line') {
         return (
           <Polyline
-            positions={createPoints}
+            positions={createPreviewPoints}
             pathOptions={{
               color: createDraft.color,
               weight: normalizeLineWidth(createDraft.lineWidth),
@@ -6881,10 +6909,10 @@ function App() {
         )
       }
 
-      if (createPoints.length >= 3) {
+      if (createPreviewPoints.length >= 3) {
         return (
           <Polygon
-            positions={createPoints}
+            positions={createPreviewPoints}
             pathOptions={{
               color: createDraft.color,
               weight: normalizeLineWidth(createDraft.lineWidth),
@@ -6897,7 +6925,7 @@ function App() {
 
       return (
         <Polyline
-          positions={createPoints}
+          positions={createPreviewPoints}
           pathOptions={{
             color: createDraft.color,
             weight: normalizeLineWidth(createDraft.lineWidth),
@@ -6970,6 +6998,8 @@ function App() {
       editDraft &&
       editPoints.length > 0
     ) {
+      const editPreviewPoints = appendPreviewPoint(editPoints, draftPreviewPoint)
+
       if (editDraft.geometry === 'point') {
         return (
           <CircleMarker
@@ -6988,7 +7018,7 @@ function App() {
       if (editDraft.geometry === 'line') {
         return (
           <Polyline
-            positions={editPoints}
+            positions={editPreviewPoints}
             pathOptions={{
               color: editDraft.color,
               weight: normalizeLineWidth(editDraft.lineWidth),
@@ -6998,10 +7028,10 @@ function App() {
         )
       }
 
-      if (editPoints.length >= 3) {
+      if (editPreviewPoints.length >= 3) {
         return (
           <Polygon
-            positions={editPoints}
+            positions={editPreviewPoints}
             pathOptions={{
               color: editDraft.color,
               weight: normalizeLineWidth(editDraft.lineWidth),
@@ -7014,7 +7044,7 @@ function App() {
 
       return (
         <Polyline
-          positions={editPoints}
+          positions={editPreviewPoints}
           pathOptions={{
             color: editDraft.color,
             weight: normalizeLineWidth(editDraft.lineWidth),
@@ -10353,11 +10383,11 @@ function App() {
               }}
             />
           ) : null}
-          {isAdmin && isMeasureMode && measurePoints.length > 0 ? (
+          {isAdmin && isMeasureMode && measurePreviewPoints.length > 0 ? (
             measureGeometry === 'polygon' ? (
-              measurePoints.length >= 3 ? (
+              measurePreviewPoints.length >= 3 ? (
                 <Polygon
-                  positions={measurePoints}
+                  positions={measurePreviewPoints}
                   interactive={false}
                   pathOptions={{
                     color: '#0284c7',
@@ -10369,7 +10399,7 @@ function App() {
                 />
               ) : (
                 <Polyline
-                  positions={measurePoints}
+                  positions={measurePreviewPoints}
                   interactive={false}
                   pathOptions={{
                     color: '#0284c7',
@@ -10380,7 +10410,7 @@ function App() {
               )
             ) : (
               <Polyline
-                positions={measurePoints}
+                positions={measurePreviewPoints}
                 interactive={false}
                 pathOptions={{
                   color: '#0284c7',
