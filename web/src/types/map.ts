@@ -1,6 +1,6 @@
 export type StatusId = 'existant' | 'en cours' | 'propose'
 
-export type PointIconId =
+export type BuiltInPointIconId =
   | 'dot'
   | 'pin'
   | 'metro'
@@ -10,6 +10,8 @@ export type PointIconId =
   | 'bike'
   | 'park'
   | 'star'
+
+export type PointIconId = BuiltInPointIconId | `custom:${string}`
 
 export type LabelMode = 'auto' | 'always' | 'hover'
 export type LineDashStyle = 'solid' | 'dashed' | 'dotted'

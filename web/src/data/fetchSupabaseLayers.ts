@@ -1,4 +1,5 @@
 import type {
+  BuiltInPointIconId,
   FeatureStyle,
   GeometryFeature,
   LayerConfig,
@@ -37,6 +38,28 @@ const STATUS_DEFAULT_COLOR: Record<StatusId, string> = {
   existant: '#15803d',
   'en cours': '#b45309',
   propose: '#1d4ed8',
+}
+
+function isBuiltInPointIcon(value: unknown): value is BuiltInPointIconId {
+  return (
+    value === 'dot' ||
+    value === 'pin' ||
+    value === 'metro' ||
+    value === 'tram' ||
+    value === 'bus' ||
+    value === 'train' ||
+    value === 'bike' ||
+    value === 'park' ||
+    value === 'star'
+  )
+}
+
+function isCustomPointIcon(value: unknown): value is `custom:${string}` {
+  return (
+    typeof value === 'string' &&
+    value.startsWith('custom:') &&
+    value.slice('custom:'.length).trim().length > 0
+  )
 }
 
 function asStatus(value: string): StatusId | null {
@@ -80,17 +103,7 @@ function normalizeStyle(raw: unknown): FeatureStyle | undefined {
   if (typeof source.fillOpacity === 'number' && Number.isFinite(source.fillOpacity)) {
     result.fillOpacity = source.fillOpacity
   }
-  if (
-    source.pointIcon === 'dot' ||
-    source.pointIcon === 'pin' ||
-    source.pointIcon === 'metro' ||
-    source.pointIcon === 'tram' ||
-    source.pointIcon === 'bus' ||
-    source.pointIcon === 'train' ||
-    source.pointIcon === 'bike' ||
-    source.pointIcon === 'park' ||
-    source.pointIcon === 'star'
-  ) {
+  if (isBuiltInPointIcon(source.pointIcon) || isCustomPointIcon(source.pointIcon)) {
     result.pointIcon = source.pointIcon
   }
   if (

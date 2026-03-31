@@ -56,6 +56,7 @@ import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
 import { layers as fallbackLayers } from './data/layers'
 import { hasSupabase, supabase } from './lib/supabase'
 import type {
+  BuiltInPointIconId,
   FeatureStyle,
   GeometryFeature,
   LabelMode,
@@ -240,6 +241,27 @@ interface StyleTemplateOption {
   patch: Partial<CreateDraft>
 }
 
+interface LayerUniformStyle {
+  enabled: boolean
+  color: string
+  pointRadius: number
+  lineWidth: number
+  fillOpacity: number
+  pointIcon: PointIconId
+}
+
+interface CustomPointIcon {
+  id: string
+  label: string
+  dataUrl: string
+  createdAt: number
+}
+
+interface PointIconOption {
+  value: PointIconId
+  label: string
+}
+
 interface PersistedUiStateV1 {
   version: 1
   updatedAt: string
@@ -276,6 +298,7 @@ interface PersistedUiStateV1 {
   localHistoryPast?: LocalHistoryEntry[]
   localHistoryFuture?: LocalHistoryEntry[]
   lockedLayers?: Record<string, boolean>
+  layerUniformStyles?: Record<string, LayerUniformStyle>
   collapsedLayerFolders?: Record<string, boolean>
   layerZoomVisibility?: Record<
     string,
@@ -286,6 +309,7 @@ interface PersistedUiStateV1 {
   layerPresetDraftName?: string
   layerVisibilityPresets?: LayerVisibilityPreset[]
   viewBookmarks?: ViewBookmark[]
+  customPointIcons?: CustomPointIcon[]
   isNorthArrowVisible?: boolean
   isPresentationMode?: boolean
   showWelcomeHint?: boolean
@@ -400,7 +424,7 @@ const MEASURE_GEOMETRY_LABELS: Record<MeasureGeometry, string> = {
 const DEFAULT_POINT_RADIUS = 6
 const DEFAULT_LINE_WIDTH = 3
 const DEFAULT_POLYGON_FILL_OPACITY = 0.2
-const DEFAULT_POINT_ICON: PointIconId = 'dot'
+const DEFAULT_POINT_ICON: BuiltInPointIconId = 'dot'
 const DEFAULT_LABEL_MODE: LabelMode = 'auto'
 const DEFAULT_LABEL_SIZE = 13
 const DEFAULT_LABEL_HALO = true
@@ -412,11 +436,25 @@ const DEFAULT_POLYGON_PATTERN: PolygonPattern = 'none'
 const DEFAULT_POLYGON_BORDER_MODE: PolygonBorderMode = 'normal'
 const DEFAULT_POINT_NUMBER_PREFIX = 'Point'
 const DEFAULT_GEOLOCATE_ZOOM = 16
+const MAX_CUSTOM_POINT_ICONS = 40
+const MAX_CUSTOM_POINT_ICON_BYTES = 300 * 1024
 const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 const MAX_VIEW_BOOKMARKS = 30
 const MAX_LAYER_PRESETS = 30
 
-const POINT_ICON_LABELS: Record<PointIconId, string> = {
+const BUILTIN_POINT_ICON_IDS: BuiltInPointIconId[] = [
+  'dot',
+  'pin',
+  'metro',
+  'tram',
+  'bus',
+  'train',
+  'bike',
+  'park',
+  'star',
+]
+
+const POINT_ICON_LABELS: Record<BuiltInPointIconId, string> = {
   dot: 'Rond',
   pin: 'Épingle',
   metro: 'Métro',
@@ -428,7 +466,7 @@ const POINT_ICON_LABELS: Record<PointIconId, string> = {
   star: 'Étoile',
 }
 
-const POINT_ICON_GLYPHS: Record<PointIconId, string> = {
+const POINT_ICON_GLYPHS: Record<BuiltInPointIconId, string> = {
   dot: '•',
   pin: '📍',
   metro: 'Ⓜ',
@@ -743,6 +781,17 @@ function normalizeLayerOpacity(value: number): number {
   return Math.round(clamp(value, 0.15, 1) * 100) / 100
 }
 
+function buildDefaultLayerUniformStyle(): LayerUniformStyle {
+  return {
+    enabled: false,
+    color: '#1d4ed8',
+    pointRadius: DEFAULT_POINT_RADIUS,
+    lineWidth: DEFAULT_LINE_WIDTH,
+    fillOpacity: DEFAULT_POLYGON_FILL_OPACITY,
+    pointIcon: DEFAULT_POINT_ICON,
+  }
+}
+
 function appendPreviewPoint(
   points: LatLngTuple[],
   previewPoint: LatLngTuple | null,
@@ -782,8 +831,8 @@ function normalizeLabelPriority(value: number): number {
   return Math.round(Math.max(0, Math.min(100, value)))
 }
 
-function normalizePointIcon(value: unknown): PointIconId {
-  if (
+function isBuiltInPointIcon(value: unknown): value is BuiltInPointIconId {
+  return (
     value === 'dot' ||
     value === 'pin' ||
     value === 'metro' ||
@@ -793,7 +842,26 @@ function normalizePointIcon(value: unknown): PointIconId {
     value === 'bike' ||
     value === 'park' ||
     value === 'star'
-  ) {
+  )
+}
+
+function isCustomPointIcon(value: unknown): value is `custom:${string}` {
+  return (
+    typeof value === 'string' &&
+    value.startsWith('custom:') &&
+    value.slice('custom:'.length).trim().length > 0
+  )
+}
+
+function getCustomPointIconCatalogId(iconId: PointIconId): string | null {
+  if (!isCustomPointIcon(iconId)) {
+    return null
+  }
+  return iconId.slice('custom:'.length)
+}
+
+function normalizePointIcon(value: unknown): PointIconId {
+  if (isBuiltInPointIcon(value) || isCustomPointIcon(value)) {
     return value
   }
   return DEFAULT_POINT_ICON
@@ -1275,6 +1343,23 @@ function formatGeolocationError(error: GeolocationPositionError): string {
   return error.message ? error.message : 'erreur inconnue.'
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error('Lecture de fichier invalide.'))
+    }
+    reader.onerror = () => {
+      reject(reader.error ?? new Error('Lecture de fichier impossible.'))
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 function parsePersistedMapView(value: unknown): { center: LatLngTuple; zoom: number } | null {
   if (!isObjectRecord(value)) {
     return null
@@ -1539,6 +1624,76 @@ function parseLayerOpacityByKey(value: unknown): Record<string, number> {
     result[key] = normalizeLayerOpacity(parsed)
   }
   return result
+}
+
+function parseLayerUniformStyles(value: unknown): Record<string, LayerUniformStyle> {
+  if (!isObjectRecord(value)) {
+    return {}
+  }
+  const result: Record<string, LayerUniformStyle> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (!isObjectRecord(entry)) {
+      continue
+    }
+    const fallback = buildDefaultLayerUniformStyle()
+    const enabled = parseBooleanValue(entry.enabled) ?? fallback.enabled
+    const color = parseHexColorValue(entry.color, fallback.color)
+    const pointRadius = normalizePointRadius(
+      parseFiniteNumber(entry.pointRadius) ?? fallback.pointRadius,
+    )
+    const lineWidth = normalizeLineWidth(
+      parseFiniteNumber(entry.lineWidth) ?? fallback.lineWidth,
+    )
+    const fillOpacity = normalizeFillOpacity(
+      parseFiniteNumber(entry.fillOpacity) ?? fallback.fillOpacity,
+    )
+    const pointIcon = normalizePointIcon(entry.pointIcon ?? fallback.pointIcon)
+    result[key] = {
+      enabled,
+      color,
+      pointRadius,
+      lineWidth,
+      fillOpacity,
+      pointIcon,
+    }
+  }
+  return result
+}
+
+function parseCustomPointIcons(value: unknown): CustomPointIcon[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const result: CustomPointIcon[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) {
+      continue
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim().length > 0 ? item.id.trim() : null
+    const label =
+      typeof item.label === 'string' && item.label.trim().length > 0
+        ? item.label.trim()
+        : null
+    const dataUrl =
+      typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:image/')
+        ? item.dataUrl
+        : null
+    if (!id || !label || !dataUrl) {
+      continue
+    }
+    const createdAt =
+      typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+        ? item.createdAt
+        : Date.now()
+    result.push({
+      id,
+      label,
+      dataUrl,
+      createdAt,
+    })
+  }
+  return result.slice(0, MAX_CUSTOM_POINT_ICONS)
 }
 
 function parseSharedUrlState(search: string): SharedUrlState | null {
@@ -2224,12 +2379,23 @@ function makePointIcon(
   color: string,
   selected: boolean,
   radius: number,
+  customDataUrl?: string | null,
 ): DivIcon {
-  const glyph = POINT_ICON_GLYPHS[iconId]
+  const builtInIconId = isBuiltInPointIcon(iconId) ? iconId : DEFAULT_POINT_ICON
+  const glyph = POINT_ICON_GLYPHS[builtInIconId]
   const size = clamp(Math.round(radius * 2.7), 16, 46)
   const border = selected ? '#0f172a' : color
-  const bg = iconId === 'dot' ? color : '#ffffff'
-  const textColor = iconId === 'dot' ? '#ffffff' : color
+  if (!isBuiltInPointIcon(iconId) && customDataUrl) {
+    const escapedDataUrl = customDataUrl.replaceAll('"', '&quot;')
+    return new DivIcon({
+      className: 'feature-point-icon-wrapper',
+      html: `<span class="feature-point-icon custom${selected ? ' selected' : ''}" style="--icon-size:${size}px;--icon-border:${border};--icon-bg:#ffffff;--icon-color:${color};"><img src="${escapedDataUrl}" alt="" loading="lazy" decoding="async" /></span>`,
+      iconSize: [size, size],
+      iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
+    })
+  }
+  const bg = builtInIconId === 'dot' ? color : '#ffffff'
+  const textColor = builtInIconId === 'dot' ? '#ffffff' : color
   return new DivIcon({
     className: 'feature-point-icon-wrapper',
     html: `<span class="feature-point-icon${selected ? ' selected' : ''}" style="--icon-size:${size}px;--icon-border:${border};--icon-bg:${bg};--icon-color:${textColor};">${glyph}</span>`,
@@ -2270,6 +2436,11 @@ function App() {
     Record<string, { minZoom: number; maxZoom: number }>
   >({})
   const [layerOpacityByKey, setLayerOpacityByKey] = useState<Record<string, number>>({})
+  const [layerUniformStyles, setLayerUniformStyles] = useState<
+    Record<string, LayerUniformStyle>
+  >({})
+  const [customPointIcons, setCustomPointIcons] = useState<CustomPointIcon[]>([])
+  const [customPointIconDraftLabel, setCustomPointIconDraftLabel] = useState('')
   const [mapSearchQuery, setMapSearchQuery] = useState('')
   const [mapSearchResults, setMapSearchResults] = useState<MapSearchCandidate[]>([])
   const [isSearchingMap, setIsSearchingMap] = useState(false)
@@ -2587,8 +2758,14 @@ function App() {
       if (persisted.layerOpacityByKey !== undefined) {
         setLayerOpacityByKey(parseLayerOpacityByKey(persisted.layerOpacityByKey))
       }
+      if (persisted.layerUniformStyles !== undefined) {
+        setLayerUniformStyles(parseLayerUniformStyles(persisted.layerUniformStyles))
+      }
       if (persisted.viewBookmarks !== undefined) {
         setViewBookmarks(parseViewBookmarks(persisted.viewBookmarks))
+      }
+      if (persisted.customPointIcons !== undefined) {
+        setCustomPointIcons(parseCustomPointIcons(persisted.customPointIcons))
       }
       if (typeof persisted.layerPanelSearchQuery === 'string') {
         setLayerPanelSearchQuery(persisted.layerPanelSearchQuery)
@@ -2899,6 +3076,7 @@ function App() {
       localHistoryPast,
       localHistoryFuture,
       lockedLayers,
+      layerUniformStyles,
       collapsedLayerFolders,
       layerZoomVisibility,
       layerOpacityByKey,
@@ -2906,6 +3084,7 @@ function App() {
       layerPresetDraftName,
       layerVisibilityPresets,
       viewBookmarks,
+      customPointIcons,
       isNorthArrowVisible,
       isPresentationMode,
       showWelcomeHint,
@@ -2925,6 +3104,7 @@ function App() {
     adminMode,
     baseMapId,
     collapsedLayerFolders,
+    customPointIcons,
     categoryFilter,
     createDraft,
     createPoints,
@@ -2951,6 +3131,7 @@ function App() {
     layerPanelSearchQuery,
     layerPresetDraftName,
     layerOpacityByKey,
+    layerUniformStyles,
     layerVisibilityPresets,
     layerZoomVisibility,
     lockedLayers,
@@ -3026,23 +3207,47 @@ function App() {
     [geometryFilter, statusFilter],
   )
 
+  const customPointIconById = useMemo(
+    () => new Map(customPointIcons.map((item) => [item.id, item])),
+    [customPointIcons],
+  )
+
+  const pointIconOptions = useMemo<PointIconOption[]>(() => {
+    const builtInOptions: PointIconOption[] = BUILTIN_POINT_ICON_IDS.map((iconId) => ({
+      value: iconId,
+      label: POINT_ICON_LABELS[iconId],
+    }))
+    const customOptions: PointIconOption[] = customPointIcons.map((item) => ({
+      value: `custom:${item.id}` as PointIconId,
+      label: `${item.label} (perso)`,
+    }))
+    return [...builtInOptions, ...customOptions]
+  }, [customPointIcons])
+
   const visibleFeaturesBase = useMemo<VisibleFeature[]>(
     () =>
       visibleLayers
         .flatMap((layer) =>
           layer.features
             .filter((feature) => isFeatureVisibleByFilters(feature))
-            .map((feature) => ({
-              id: feature.id,
-              name: feature.name,
-              status: feature.status,
-              geometry: feature.geometry,
-              category: layer.category,
-              layerLabel: layer.label,
-              color: feature.color,
-            })),
+            .map((feature) => {
+              const layerStyle = layerUniformStyles[toLayerLockKey(layer.category, layer.id)]
+              const displayColor =
+                layerStyle?.enabled && isHexColor(layerStyle.color)
+                  ? layerStyle.color
+                  : feature.color
+              return {
+                id: feature.id,
+                name: feature.name,
+                status: feature.status,
+                geometry: feature.geometry,
+                category: layer.category,
+                layerLabel: layer.label,
+                color: displayColor,
+              }
+            }),
         ),
-    [isFeatureVisibleByFilters, visibleLayers],
+    [isFeatureVisibleByFilters, layerUniformStyles, visibleLayers],
   )
 
   const visibleFeatures = useMemo<VisibleFeature[]>(() => {
@@ -3693,6 +3898,61 @@ function App() {
   const handleResetLayerZoom = useCallback((category: string, layerId: string) => {
     const key = toLayerLockKey(category, layerId)
     setLayerZoomVisibility((current) => {
+      if (current[key] === undefined) {
+        return current
+      }
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }, [])
+
+  const handleLayerUniformStyleChange = useCallback(
+    (
+      category: string,
+      layerId: string,
+      patch: Partial<LayerUniformStyle>,
+    ) => {
+      const key = toLayerLockKey(category, layerId)
+      setLayerUniformStyles((current) => {
+        const fallback = buildDefaultLayerUniformStyle()
+        const base = current[key] ?? fallback
+        const next: LayerUniformStyle = {
+          enabled:
+            typeof patch.enabled === 'boolean' ? patch.enabled : base.enabled,
+          color:
+            typeof patch.color === 'string' && isHexColor(patch.color)
+              ? patch.color
+              : base.color,
+          pointRadius:
+            typeof patch.pointRadius === 'number' && Number.isFinite(patch.pointRadius)
+              ? normalizePointRadius(patch.pointRadius)
+              : base.pointRadius,
+          lineWidth:
+            typeof patch.lineWidth === 'number' && Number.isFinite(patch.lineWidth)
+              ? normalizeLineWidth(patch.lineWidth)
+              : base.lineWidth,
+          fillOpacity:
+            typeof patch.fillOpacity === 'number' && Number.isFinite(patch.fillOpacity)
+              ? normalizeFillOpacity(patch.fillOpacity)
+              : base.fillOpacity,
+          pointIcon:
+            patch.pointIcon !== undefined
+              ? normalizePointIcon(patch.pointIcon)
+              : base.pointIcon,
+        }
+        return {
+          ...current,
+          [key]: next,
+        }
+      })
+    },
+    [],
+  )
+
+  const handleResetLayerUniformStyle = useCallback((category: string, layerId: string) => {
+    const key = toLayerLockKey(category, layerId)
+    setLayerUniformStyles((current) => {
       if (current[key] === undefined) {
         return current
       }
@@ -6817,6 +7077,79 @@ function App() {
     }))
   }
 
+  const handleCustomPointIconFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      event.target.value = ''
+      if (!file) {
+        return
+      }
+      if (!file.type.startsWith('image/')) {
+        setAdminNotice('Icône invalide: sélectionne un fichier image.')
+        return
+      }
+      if (file.size > MAX_CUSTOM_POINT_ICON_BYTES) {
+        setAdminNotice('Icône trop lourde: limite 300 Ko.')
+        return
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file)
+        const labelFromFile = file.name.replace(/\.[^.]+$/, '').trim()
+        const labelCandidate =
+          customPointIconDraftLabel.trim() || labelFromFile || 'Icône personnalisée'
+        const sanitizedLabel = labelCandidate.slice(0, 60)
+        const newItem: CustomPointIcon = {
+          id: crypto.randomUUID(),
+          label: sanitizedLabel,
+          dataUrl,
+          createdAt: Date.now(),
+        }
+        setCustomPointIcons((current) => [newItem, ...current].slice(0, MAX_CUSTOM_POINT_ICONS))
+        setCustomPointIconDraftLabel('')
+        setAdminNotice(`Icône ajoutée: ${sanitizedLabel}.`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'erreur inconnue'
+        setAdminNotice(`Import icône impossible: ${message}`)
+      }
+    },
+    [customPointIconDraftLabel],
+  )
+
+  const handleDeleteCustomPointIcon = useCallback((iconId: string) => {
+    const targetPointIcon = `custom:${iconId}` as PointIconId
+    setCustomPointIcons((current) => current.filter((item) => item.id !== iconId))
+    setCreateDraft((current) =>
+      current.pointIcon === targetPointIcon
+        ? {
+            ...current,
+            pointIcon: DEFAULT_POINT_ICON,
+          }
+        : current,
+    )
+    setEditDraft((current) => {
+      if (!current || current.pointIcon !== targetPointIcon) {
+        return current
+      }
+      return {
+        ...current,
+        pointIcon: DEFAULT_POINT_ICON,
+      }
+    })
+    setLayerUniformStyles((current) => {
+      const entries = Object.entries(current).map(([key, style]) => [
+        key,
+        style.pointIcon === targetPointIcon
+          ? {
+              ...style,
+              pointIcon: DEFAULT_POINT_ICON,
+            }
+          : style,
+      ])
+      return Object.fromEntries(entries)
+    })
+    setAdminNotice('Icône personnalisée supprimée.')
+  }, [])
+
   useEffect(() => {
     if (!isAdmin) {
       return
@@ -7334,10 +7667,31 @@ function App() {
   const renderLayerFeatures = (layer: LayerConfig) => {
     const layerLocked = isLayerLocked(layer.category, layer.id)
     const layerOpacity = getLayerOpacity(layer.category, layer.id)
+    const layerStyleKey = toLayerLockKey(layer.category, layer.id)
+    const layerUniformStyle = layerUniformStyles[layerStyleKey]
+    const hasUniformLayerStyle = Boolean(layerUniformStyle?.enabled)
     return layer.features
       .filter((feature) => isFeatureVisibleByFilters(feature))
       .flatMap((feature) => {
-        const styleDraft = resolveDraftStyle(feature.geometry, feature.style)
+        const styleDraft =
+          hasUniformLayerStyle && layerUniformStyle
+            ? resolveDraftStyle(feature.geometry, {
+                ...feature.style,
+                pointRadius: layerUniformStyle.pointRadius,
+                lineWidth: layerUniformStyle.lineWidth,
+                fillOpacity: layerUniformStyle.fillOpacity,
+                pointIcon: layerUniformStyle.pointIcon,
+              })
+            : resolveDraftStyle(feature.geometry, feature.style)
+        const displayColor =
+          hasUniformLayerStyle && layerUniformStyle && isHexColor(layerUniformStyle.color)
+            ? layerUniformStyle.color
+            : feature.color
+        const customPointIconDataUrl = isCustomPointIcon(styleDraft.pointIcon)
+          ? customPointIconById.get(
+              getCustomPointIconCatalogId(styleDraft.pointIcon) ?? '',
+            )?.dataUrl ?? null
+          : null
         const isSelected = selectedFeatureIdSet.has(feature.id)
         const isFocusedSelection = selectedFeatureId === feature.id
         const isHiddenSelectedGeometry =
@@ -7418,8 +7772,8 @@ function App() {
                 radius={radius}
                 eventHandlers={eventHandlers}
                 pathOptions={{
-                  color: isSelected ? '#0f172a' : feature.color,
-                  fillColor: feature.color,
+                  color: isSelected ? '#0f172a' : displayColor,
+                  fillColor: displayColor,
                   opacity: clamp(layerOpacity + (isSelected ? 0.18 : 0), 0.15, 1),
                   fillOpacity: clamp(
                     (isSelected ? 0.95 : 0.85) * layerOpacity,
@@ -7438,7 +7792,13 @@ function App() {
             <Marker
               key={feature.id}
               position={feature.position}
-              icon={makePointIcon(styleDraft.pointIcon, feature.color, isSelected, radius)}
+              icon={makePointIcon(
+                styleDraft.pointIcon,
+                displayColor,
+                isSelected,
+                radius,
+                customPointIconDataUrl,
+              )}
               eventHandlers={eventHandlers}
               opacity={clamp(layerOpacity + (isSelected ? 0.15 : 0), 0.2, 1)}
             >
@@ -7463,7 +7823,7 @@ function App() {
               positions={feature.positions}
               eventHandlers={eventHandlers}
               pathOptions={{
-                color: feature.color,
+                color: displayColor,
                 weight: clamp(
                   normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1.3 : 0),
                   1,
@@ -7482,7 +7842,7 @@ function App() {
               <Marker
                 key={`${feature.id}-arrow-${anchor.id}`}
                 position={anchor.position}
-                icon={makeLineArrowIcon(feature.color, anchor.angle)}
+                icon={makeLineArrowIcon(displayColor, anchor.angle)}
                 interactive={false}
                 opacity={clamp(layerOpacity + (isSelected ? 0.1 : 0), 0.2, 1)}
               />,
@@ -7524,9 +7884,9 @@ function App() {
             positions={feature.positions}
             eventHandlers={eventHandlers}
             pathOptions={{
-              color: feature.color,
+              color: displayColor,
               weight: borderWeight,
-              fillColor: feature.color,
+              fillColor: displayColor,
               opacity: clamp(layerOpacity + (isSelected ? 0.12 : 0), 0.16, 1),
               fillOpacity: clamp(fillOpacity * layerOpacity, 0.05, 1),
               dashArray: polygonDashArray,
@@ -7650,10 +8010,16 @@ function App() {
       if (style.labelMode === 'hover') {
         continue
       }
+      const layerStyleKey = toLayerLockKey(entry.category, entry.layerId)
+      const layerUniformStyle = layerUniformStyles[layerStyleKey]
+      const labelColor =
+        layerUniformStyle?.enabled && isHexColor(layerUniformStyle.color)
+          ? layerUniformStyle.color
+          : entry.feature.color
       candidates.push({
         id: entry.feature.id,
         name: entry.feature.name,
-        color: entry.feature.color,
+        color: labelColor,
         position: computeFeatureCenter(entry.feature),
         labelSize: normalizeLabelSize(style.labelSize),
         labelHalo: style.labelHalo,
@@ -7689,6 +8055,7 @@ function App() {
     getLayerOpacity,
     isLabelCollisionEnabled,
     isLabelOverlayActive,
+    layerUniformStyles,
     mapVisibleFeatureEntries,
   ])
 
@@ -7913,6 +8280,58 @@ function App() {
                   >
                     Deconnexion
                   </button>
+                </div>
+
+                <div className="editor-block">
+                  <h3>Catalogue d'icônes points</h3>
+                  <p className="muted">
+                    Ajoute des pictogrammes personnalisés pour les points (stockage local navigateur).
+                  </p>
+                  <div className="grid-2">
+                    <label>
+                      Libellé (optionnel)
+                      <input
+                        type="text"
+                        value={customPointIconDraftLabel}
+                        onChange={(event) =>
+                          setCustomPointIconDraftLabel(event.target.value)
+                        }
+                        placeholder="Ex: École / Parking / Santé"
+                      />
+                    </label>
+                    <label>
+                      Import image
+                      <input
+                        type="file"
+                        accept="image/png,image/svg+xml,image/webp,image/jpeg,image/gif"
+                        onChange={(event) => void handleCustomPointIconFileChange(event)}
+                      />
+                    </label>
+                  </div>
+                  {customPointIcons.length === 0 ? (
+                    <p className="muted">Aucune icône personnalisée.</p>
+                  ) : (
+                    <ul className="custom-point-icon-list">
+                      {customPointIcons.map((icon) => (
+                        <li key={icon.id}>
+                          <img src={icon.dataUrl} alt="" loading="lazy" />
+                          <div>
+                            <strong>{icon.label}</strong>
+                            <p className="muted">
+                              {new Date(icon.createdAt).toLocaleString('fr-FR')}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost-button mini-button"
+                            onClick={() => handleDeleteCustomPointIcon(icon.id)}
+                          >
+                            Suppr.
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="editor-block">
@@ -9253,6 +9672,10 @@ function App() {
                       const layerOpacity = layerOpacityByKey[layerZoomKey] ?? 1
                       const hasCustomOpacity =
                         layerOpacityByKey[layerZoomKey] !== undefined
+                      const layerUniformStyle =
+                        layerUniformStyles[layerZoomKey] ?? buildDefaultLayerUniformStyle()
+                      const hasCustomUniformStyle =
+                        layerUniformStyles[layerZoomKey] !== undefined
                       return (
                         <div
                           key={layer.id}
@@ -9451,6 +9874,140 @@ function App() {
                                   title="Réinitialiser opacité du calque"
                                 >
                                   100%
+                                </button>
+                              </div>
+                              <div className="layer-uniform-style-controls">
+                                <label className="control-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={layerUniformStyle.enabled}
+                                    onChange={(event) =>
+                                      handleLayerUniformStyleChange(
+                                        block.category,
+                                        layer.id,
+                                        { enabled: event.target.checked },
+                                      )
+                                    }
+                                  />
+                                  <span>Style uniforme du calque</span>
+                                </label>
+                                {layerUniformStyle.enabled ? (
+                                  <div className="layer-uniform-style-grid">
+                                    <label>
+                                      Couleur
+                                      <input
+                                        type="color"
+                                        value={layerUniformStyle.color}
+                                        onChange={(event) =>
+                                          handleLayerUniformStyleChange(
+                                            block.category,
+                                            layer.id,
+                                            { color: event.target.value },
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label>
+                                      Icône points
+                                      <select
+                                        value={layerUniformStyle.pointIcon}
+                                        onChange={(event) =>
+                                          handleLayerUniformStyleChange(
+                                            block.category,
+                                            layer.id,
+                                            {
+                                              pointIcon: event.target
+                                                .value as PointIconId,
+                                            },
+                                          )
+                                        }
+                                      >
+                                        {pointIconOptions.map((option) => (
+                                          <option key={option.value} value={option.value}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label>
+                                      Taille point {Math.round(layerUniformStyle.pointRadius)} px
+                                      <input
+                                        type="range"
+                                        min={3}
+                                        max={24}
+                                        step={1}
+                                        value={layerUniformStyle.pointRadius}
+                                        onChange={(event) =>
+                                          handleLayerUniformStyleChange(
+                                            block.category,
+                                            layer.id,
+                                            {
+                                              pointRadius: Number.parseInt(
+                                                event.target.value,
+                                                10,
+                                              ),
+                                            },
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label>
+                                      Épaisseur ligne {layerUniformStyle.lineWidth.toFixed(1)} px
+                                      <input
+                                        type="range"
+                                        min={1}
+                                        max={14}
+                                        step={0.5}
+                                        value={layerUniformStyle.lineWidth}
+                                        onChange={(event) =>
+                                          handleLayerUniformStyleChange(
+                                            block.category,
+                                            layer.id,
+                                            {
+                                              lineWidth: Number.parseFloat(
+                                                event.target.value,
+                                              ),
+                                            },
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label>
+                                      Opacité polygone {layerUniformStyle.fillOpacity.toFixed(2)}
+                                      <input
+                                        type="range"
+                                        min={0.05}
+                                        max={0.95}
+                                        step={0.05}
+                                        value={layerUniformStyle.fillOpacity}
+                                        onChange={(event) =>
+                                          handleLayerUniformStyleChange(
+                                            block.category,
+                                            layer.id,
+                                            {
+                                              fillOpacity: Number.parseFloat(
+                                                event.target.value,
+                                              ),
+                                            },
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                  </div>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="ghost-button mini-button"
+                                  onClick={() =>
+                                    handleResetLayerUniformStyle(
+                                      block.category,
+                                      layer.id,
+                                    )
+                                  }
+                                  disabled={!hasCustomUniformStyle}
+                                  title="Réinitialiser style uniforme du calque"
+                                >
+                                  Réinitialiser style
                                 </button>
                               </div>
                             </div>
@@ -10105,12 +10662,9 @@ function App() {
                             })
                           }
                         >
-                          {(Object.entries(POINT_ICON_LABELS) as [
-                            PointIconId,
-                            string,
-                          ][]).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
+                          {pointIconOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
                             </option>
                           ))}
                         </select>

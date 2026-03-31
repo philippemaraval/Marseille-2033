@@ -211,6 +211,28 @@
   width: 100%;
 }
 
+.layer-uniform-style-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed #dbe2ea;
+}
+
+.layer-uniform-style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.layer-uniform-style-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+}
+
 .radio-grid {
   display: grid;
   gap: 8px;
@@ -390,6 +412,40 @@
   margin: 2px 0 0;
   font-size: 11px;
   color: #64748b;
+}
+
+.custom-point-icon-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.custom-point-icon-list li {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-point-icon-list img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.custom-point-icon-list strong {
+  font-size: 12px;
+  color: #334155;
+}
+
+.custom-point-icon-list .muted {
+  margin-top: 2px;
+  font-size: 11px;
 }
 
 .bookmark-tools {
@@ -1157,6 +1213,18 @@
 
 .feature-point-icon.selected {
   box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.16), 0 3px 10px rgba(15, 23, 42, 0.35);
+}
+
+.feature-point-icon.custom {
+  overflow: hidden;
+  padding: 0;
+}
+
+.feature-point-icon.custom img {
+  width: calc(var(--icon-size) - 6px);
+  height: calc(var(--icon-size) - 6px);
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .feature-line-arrow-wrapper {
