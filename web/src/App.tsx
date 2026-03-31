@@ -261,6 +261,8 @@ interface PersistedUiStateV1 {
   selectedFeatureIds?: string[]
   createDraft?: Partial<CreateDraft>
   createPoints?: LatLngTuple[]
+  isPointAutoNumberingEnabled?: boolean
+  pointAutoNumberPrefix?: string
   editDraft?: Partial<EditDraft> | null
   editPoints?: LatLngTuple[]
   importDraft?: Partial<ImportDraft>
@@ -288,6 +290,7 @@ interface PersistedUiStateV1 {
   isPresentationMode?: boolean
   showWelcomeHint?: boolean
   isMapToolbarCollapsed?: boolean
+  isLocateOnLoadEnabled?: boolean
   mapView?: {
     center: LatLngTuple
     zoom: number
@@ -407,6 +410,8 @@ const DEFAULT_LINE_ARROWS = false
 const DEFAULT_LINE_DIRECTION: LineDirectionMode = 'none'
 const DEFAULT_POLYGON_PATTERN: PolygonPattern = 'none'
 const DEFAULT_POLYGON_BORDER_MODE: PolygonBorderMode = 'normal'
+const DEFAULT_POINT_NUMBER_PREFIX = 'Point'
+const DEFAULT_GEOLOCATE_ZOOM = 16
 const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 const MAX_VIEW_BOOKMARKS = 30
 const MAX_LAYER_PRESETS = 30
@@ -1210,6 +1215,64 @@ function clampPointToMetropole(point: LatLngTuple): LatLngTuple {
     clamp(point[0], METROPOLE_LAT_MIN, METROPOLE_LAT_MAX),
     clamp(point[1], METROPOLE_LNG_MIN, METROPOLE_LNG_MAX),
   ]
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function buildAutoPointSequenceName(options: {
+  layers: LayerConfig[]
+  category: string
+  layerId: string
+  prefix: string
+}): string {
+  const normalizedPrefix =
+    options.prefix.trim().length > 0
+      ? options.prefix.trim()
+      : DEFAULT_POINT_NUMBER_PREFIX
+  const layer = options.layers.find(
+    (item) => item.category === options.category && item.id === options.layerId,
+  )
+  const pointFeatures =
+    layer?.features.filter((feature) => feature.geometry === 'point') ?? []
+  const matcher = new RegExp(
+    `^${escapeRegExp(normalizedPrefix)}(?:\\s+|#)?(\\d+)$`,
+    'i',
+  )
+
+  let hasMatchedSequence = false
+  let maxSequenceNumber = 0
+  for (const feature of pointFeatures) {
+    const match = matcher.exec(feature.name.trim())
+    if (!match) {
+      continue
+    }
+    const parsed = Number.parseInt(match[1], 10)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      continue
+    }
+    hasMatchedSequence = true
+    if (parsed > maxSequenceNumber) {
+      maxSequenceNumber = parsed
+    }
+  }
+
+  const nextNumber = hasMatchedSequence ? maxSequenceNumber + 1 : pointFeatures.length + 1
+  return `${normalizedPrefix} ${nextNumber}`
+}
+
+function formatGeolocationError(error: GeolocationPositionError): string {
+  if (error.code === 1) {
+    return 'permission refusée.'
+  }
+  if (error.code === 2) {
+    return 'position indisponible.'
+  }
+  if (error.code === 3) {
+    return 'délai dépassé.'
+  }
+  return error.message ? error.message : 'erreur inconnue.'
 }
 
 function parsePersistedMapView(value: unknown): { center: LatLngTuple; zoom: number } | null {
@@ -2212,6 +2275,7 @@ function App() {
   const [isSearchingMap, setIsSearchingMap] = useState(false)
   const [mapSearchNotice, setMapSearchNotice] = useState<string | null>(null)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
+  const [isLocateOnLoadEnabled, setIsLocateOnLoadEnabled] = useState(false)
   const [searchFocusPoint, setSearchFocusPoint] = useState<LatLngTuple | null>(null)
   const [bookmarkDraftName, setBookmarkDraftName] = useState('')
   const [viewBookmarks, setViewBookmarks] = useState<ViewBookmark[]>([])
@@ -2276,6 +2340,10 @@ function App() {
   )
   const [createTemplateId, setCreateTemplateId] = useState('')
   const [createPoints, setCreatePoints] = useState<LatLngTuple[]>([])
+  const [isPointAutoNumberingEnabled, setIsPointAutoNumberingEnabled] = useState(true)
+  const [pointAutoNumberPrefix, setPointAutoNumberPrefix] = useState(
+    DEFAULT_POINT_NUMBER_PREFIX,
+  )
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [editTemplateId, setEditTemplateId] = useState('')
   const [editPoints, setEditPoints] = useState<LatLngTuple[]>([])
@@ -2299,12 +2367,13 @@ function App() {
     zoom: number
   } | null>(null)
   const mapSearchRequestRef = useRef(0)
+  const hasAutoLocatedOnLoadRef = useRef(false)
 
   const isDrawingOnMap =
     isAdmin &&
     (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
   const isMapInteractionCaptureEnabled =
-    isDrawingOnMap || (isAdmin && (isZoneSelectionMode || isMeasureMode))
+    isDrawingOnMap || isMeasureMode || (isAdmin && isZoneSelectionMode)
   const isDirectGeometryEditing =
     isAdmin && adminMode === 'edit' && !isRedrawingEditGeometry
 
@@ -2620,6 +2689,20 @@ function App() {
       if (persisted.createPoints !== undefined) {
         setCreatePoints(parseLatLngTupleArray(persisted.createPoints))
       }
+      const persistedPointAutoNumbering = parseBooleanValue(
+        persisted.isPointAutoNumberingEnabled,
+      )
+      if (persistedPointAutoNumbering !== null) {
+        setIsPointAutoNumberingEnabled(persistedPointAutoNumbering)
+      }
+      if (typeof persisted.pointAutoNumberPrefix === 'string') {
+        const normalizedPrefix = persisted.pointAutoNumberPrefix.trim()
+        setPointAutoNumberPrefix(
+          normalizedPrefix.length > 0
+            ? normalizedPrefix
+            : DEFAULT_POINT_NUMBER_PREFIX,
+        )
+      }
 
       if (persisted.editDraft !== undefined) {
         setEditDraft(hydrateEditDraftFromPartial(persisted.editDraft))
@@ -2683,6 +2766,12 @@ function App() {
       )
       if (persistedMapToolbarCollapsed !== null) {
         setIsMapToolbarCollapsed(persistedMapToolbarCollapsed)
+      }
+      const persistedLocateOnLoad = parseBooleanValue(
+        persisted.isLocateOnLoadEnabled,
+      )
+      if (persistedLocateOnLoad !== null) {
+        setIsLocateOnLoadEnabled(persistedLocateOnLoad)
       }
 
       if (persisted.localHistoryPast !== undefined) {
@@ -2795,6 +2884,8 @@ function App() {
       selectedFeatureIds,
       createDraft,
       createPoints,
+      isPointAutoNumberingEnabled,
+      pointAutoNumberPrefix,
       editDraft,
       editPoints,
       importDraft,
@@ -2819,6 +2910,7 @@ function App() {
       isPresentationMode,
       showWelcomeHint,
       isMapToolbarCollapsed,
+      isLocateOnLoadEnabled,
       mapView: mapView ?? null,
     }
 
@@ -2836,6 +2928,8 @@ function App() {
     categoryFilter,
     createDraft,
     createPoints,
+    isPointAutoNumberingEnabled,
+    pointAutoNumberPrefix,
     editDraft,
     editPoints,
     featureSearchQuery,
@@ -2848,6 +2942,7 @@ function App() {
     isLabelCollisionEnabled,
     isMeasureMode,
     isMapToolbarCollapsed,
+    isLocateOnLoadEnabled,
     isNorthArrowVisible,
     isPresentationMode,
     isRedrawingEditGeometry,
@@ -3848,12 +3943,65 @@ function App() {
     [mapInstance],
   )
 
+  const notifyMeasure = useCallback(
+    (message: string) => {
+      if (isAdmin) {
+        setAdminNotice(message)
+        return
+      }
+      setNavigationNotice(message)
+    },
+    [isAdmin],
+  )
+
   const handleCenterOnMarseille = useCallback(() => {
     if (!mapInstance) {
       return
     }
     mapInstance.flyTo(MARSEILLE_CENTER, 12, { duration: 0.45 })
   }, [mapInstance])
+
+  const handleLocateUser = useCallback(
+    (options?: { silent?: boolean }) => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        if (!options?.silent) {
+          setNavigationNotice('Géolocalisation indisponible dans ce navigateur.')
+        }
+        return
+      }
+      if (!mapInstance) {
+        if (!options?.silent) {
+          setNavigationNotice('Carte indisponible pour la géolocalisation.')
+        }
+        return
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const next = clampPointToMetropole([
+            position.coords.latitude,
+            position.coords.longitude,
+          ])
+          mapInstance.flyTo(next, DEFAULT_GEOLOCATE_ZOOM, { duration: 0.45 })
+          setSearchFocusPoint(next)
+          if (!options?.silent) {
+            setNavigationNotice('Position détectée et carte recentrée.')
+          }
+        },
+        (error: GeolocationPositionError) => {
+          if (!options?.silent) {
+            setNavigationNotice(`Géolocalisation: ${formatGeolocationError(error)}`)
+          }
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10_000,
+          maximumAge: 120_000,
+        },
+      )
+    },
+    [mapInstance],
+  )
 
   const handleFitVisibleFeatures = useCallback(() => {
     const points = mapVisibleFeatureEntries.flatMap((entry) =>
@@ -3893,6 +4041,18 @@ function App() {
     },
     [mapInstance],
   )
+
+  useEffect(() => {
+    if (!isLocateOnLoadEnabled) {
+      hasAutoLocatedOnLoadRef.current = false
+      return
+    }
+    if (!mapInstance || hasAutoLocatedOnLoadRef.current) {
+      return
+    }
+    hasAutoLocatedOnLoadRef.current = true
+    handleLocateUser({ silent: true })
+  }, [handleLocateUser, isLocateOnLoadEnabled, mapInstance])
 
   const handleMapSearch = useCallback(async () => {
     const query = mapSearchQuery.trim()
@@ -4270,9 +4430,6 @@ function App() {
 
   const handleMapClick = useCallback(
     (position: LatLngTuple) => {
-      if (!isAdmin) {
-        return
-      }
       setFeatureContextMenu(null)
 
       const snap = findSnapResult(position)
@@ -4282,14 +4439,17 @@ function App() {
         pushLocalHistory('Mesure: ajout point')
         setMeasurePoints((current) => [...current, resolvedPosition])
         if (snap) {
-          setAdminNotice(
+          notifyMeasure(
             `Mesure: point ajouté avec accroche ${snap.type} (${Math.round(
               snap.distanceMeters,
             )} m).`,
           )
         } else {
-          setAdminNotice('Mesure: point ajouté.')
+          notifyMeasure('Mesure: point ajouté.')
         }
+        return
+      }
+      if (!isAdmin) {
         return
       }
 
@@ -4344,6 +4504,7 @@ function App() {
       isLayerLocked,
       isMeasureMode,
       isRedrawingEditGeometry,
+      notifyMeasure,
       pushLocalHistory,
     ],
   )
@@ -4571,9 +4732,16 @@ function App() {
     const name = createDraft.name.trim()
     const finalName =
       name ||
-      `Élément ${new Date().toLocaleString('fr-FR', {
-        hour12: false,
-      })}`
+      (createDraft.geometry === 'point' && isPointAutoNumberingEnabled
+        ? buildAutoPointSequenceName({
+            layers,
+            category,
+            layerId,
+            prefix: pointAutoNumberPrefix,
+          })
+        : `Élément ${new Date().toLocaleString('fr-FR', {
+            hour12: false,
+          })}`)
 
     if (!category || !layerLabel || !layerId) {
       setAdminNotice('Catégorie et calque sont obligatoires.')
@@ -4687,8 +4855,10 @@ function App() {
     createDraft,
     createPoints,
     isAdmin,
+    isPointAutoNumberingEnabled,
     isLayerLocked,
     layers,
+    pointAutoNumberPrefix,
     refreshFeatureVersions,
     syncSupabaseLayers,
   ])
@@ -5207,14 +5377,10 @@ function App() {
   }, [selectedFeatureId])
 
   const handleToggleMeasureMode = useCallback(() => {
-    if (!isAdmin) {
-      setAdminNotice('Connexion admin requise.')
-      return
-    }
     if (isMeasureMode) {
       setIsMeasureMode(false)
       setSnapPreview(null)
-      setAdminNotice('Outil mesure désactivé.')
+      notifyMeasure('Outil mesure désactivé.')
       return
     }
 
@@ -5225,8 +5391,8 @@ function App() {
     setZoneSelectionCurrent(null)
     setSnapPreview(null)
     setIsMeasureMode(true)
-    setAdminNotice('Outil mesure actif: clique sur la carte pour poser des points.')
-  }, [isAdmin, isMeasureMode])
+    notifyMeasure('Outil mesure actif: clique sur la carte pour poser des points.')
+  }, [isMeasureMode, notifyMeasure])
 
   const handleResetMeasure = useCallback(() => {
     if (measurePoints.length === 0) {
@@ -5235,8 +5401,8 @@ function App() {
     pushLocalHistory('Mesure: réinitialiser')
     setMeasurePoints([])
     setSnapPreview(null)
-    setAdminNotice('Mesure réinitialisée.')
-  }, [measurePoints.length, pushLocalHistory])
+    notifyMeasure('Mesure réinitialisée.')
+  }, [measurePoints.length, notifyMeasure, pushLocalHistory])
 
   const handleChangeMeasureGeometry = useCallback(
     (geometry: MeasureGeometry) => {
@@ -5249,9 +5415,9 @@ function App() {
       setMeasureGeometry(geometry)
       setMeasurePoints([])
       setSnapPreview(null)
-      setAdminNotice(`Mesure basculée en mode ${MEASURE_GEOMETRY_LABELS[geometry]}.`)
+      notifyMeasure(`Mesure basculée en mode ${MEASURE_GEOMETRY_LABELS[geometry]}.`)
     },
-    [measureGeometry, measurePoints.length, pushLocalHistory],
+    [measureGeometry, measurePoints.length, notifyMeasure, pushLocalHistory],
   )
 
   const handleToggleGrid = useCallback(() => {
@@ -5458,27 +5624,26 @@ function App() {
   )
 
   const handleMapDoubleClick = () => {
-    if (!isAdmin) {
-      return
-    }
-
     if (isMeasureMode) {
       if (
         (measureGeometry === 'line' && measurePoints.length < 2) ||
         (measureGeometry === 'polygon' && measurePoints.length < 3)
       ) {
-        setAdminNotice('Mesure incomplete: ajoute plus de points.')
+        notifyMeasure('Mesure incomplète: ajoute plus de points.')
         return
       }
       if (measureGeometry === 'line') {
-        setAdminNotice(`Distance mesuree: ${formatDistance(measureLengthMeters)}.`)
+        notifyMeasure(`Distance mesurée: ${formatDistance(measureLengthMeters)}.`)
       } else {
-        setAdminNotice(
-          `Surface mesuree: ${formatSurface(measureAreaSquareMeters)} (perimetre ${formatDistance(
+        notifyMeasure(
+          `Surface mesurée: ${formatSurface(measureAreaSquareMeters)} (périmètre ${formatDistance(
             measurePerimeterMeters,
           )}).`,
         )
       }
+      return
+    }
+    if (!isAdmin) {
       return
     }
 
@@ -5505,6 +5670,11 @@ function App() {
   }
 
   const handleMapContextMenu = () => {
+    if (isMeasureMode && measurePoints.length > 0) {
+      pushLocalHistory('Mesure: annuler dernier point')
+      setMeasurePoints((current) => current.slice(0, -1))
+      return
+    }
     if (!isAdmin) {
       return
     }
@@ -5517,12 +5687,6 @@ function App() {
       setZoneSelectionCurrent(null)
       setSnapPreview(null)
       setAdminNotice('Sélection zone annulée.')
-      return
-    }
-
-    if (isMeasureMode && measurePoints.length > 0) {
-      pushLocalHistory('Mesure: annuler dernier point')
-      setMeasurePoints((current) => current.slice(0, -1))
       return
     }
 
@@ -8707,7 +8871,74 @@ function App() {
             >
               Copier coord.
             </button>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={() => handleLocateUser()}
+            >
+              Me localiser
+            </button>
           </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={isLocateOnLoadEnabled}
+              onChange={(event) => setIsLocateOnLoadEnabled(event.target.checked)}
+            />{' '}
+            Me localiser au chargement
+          </label>
+          <div className="admin-actions-row">
+            <button
+              type="button"
+              className={`ghost-button mini-button${isMeasureMode ? ' active' : ''}`}
+              onClick={handleToggleMeasureMode}
+            >
+              {isMeasureMode ? 'Mesure ON' : 'Mesure'}
+            </button>
+            {isMeasureMode ? (
+              <>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={handleToolbarUndoLastPoint}
+                  disabled={measurePoints.length === 0}
+                >
+                  Annuler point
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={handleResetMeasure}
+                  disabled={measurePoints.length === 0}
+                >
+                  Réinitialiser
+                </button>
+              </>
+            ) : null}
+          </div>
+          {isMeasureMode ? (
+            <>
+              <label>
+                Type de mesure
+                <select
+                  value={measureGeometry}
+                  onChange={(event) =>
+                    handleChangeMeasureGeometry(event.target.value as MeasureGeometry)
+                  }
+                >
+                  <option value="line">Distance</option>
+                  <option value="polygon">Surface</option>
+                </select>
+              </label>
+              <p className="muted">
+                {measureGeometry === 'line'
+                  ? `Distance: ${formatDistance(measureLengthMeters)}`
+                  : `Surface: ${formatSurface(
+                      measureAreaSquareMeters,
+                    )} | Périmètre: ${formatDistance(measurePerimeterMeters)}`}
+              </p>
+            </>
+          ) : null}
           {navigationNotice ? <p className="muted">{navigationNotice}</p> : null}
           <p className="muted">
             Curseur:{' '}
@@ -9327,7 +9558,7 @@ function App() {
       ) : null}
 
       <main
-        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isAdmin && isZoneSelectionMode ? ' is-zone-selecting' : ''}${isAdmin && isMeasureMode ? ' is-measuring' : ''}`}
+        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isAdmin && isZoneSelectionMode ? ' is-zone-selecting' : ''}${isMeasureMode ? ' is-measuring' : ''}`}
       >
         <div className="map-floating-actions">
           <button
@@ -9447,6 +9678,34 @@ function App() {
                         placeholder="Nom (sinon automatique)"
                       />
                     </label>
+                    {createDraft.geometry === 'point' ? (
+                      <>
+                        <label className="map-toolbar-label small">
+                          <input
+                            type="checkbox"
+                            checked={isPointAutoNumberingEnabled}
+                            onChange={(event) =>
+                              setIsPointAutoNumberingEnabled(event.target.checked)
+                            }
+                          />{' '}
+                          Numérotation auto des points
+                        </label>
+                        {isPointAutoNumberingEnabled ? (
+                          <label className="map-toolbar-label small">
+                            Préfixe
+                            <input
+                              type="text"
+                              className="map-toolbar-input"
+                              value={pointAutoNumberPrefix}
+                              onChange={(event) =>
+                                setPointAutoNumberPrefix(event.target.value)
+                              }
+                              placeholder={DEFAULT_POINT_NUMBER_PREFIX}
+                            />
+                          </label>
+                        ) : null}
+                      </>
+                    ) : null}
                     <div className="map-toolbar-row">
                       <label className="map-toolbar-label small">
                         Statut
@@ -10408,7 +10667,7 @@ function App() {
               }}
             />
           ) : null}
-          {isAdmin && isMeasureMode && measurePreviewPoints.length > 0 ? (
+          {isMeasureMode && measurePreviewPoints.length > 0 ? (
             measureGeometry === 'polygon' ? (
               measurePreviewPoints.length >= 3 ? (
                 <Polygon
