@@ -25,6 +25,7 @@ interface MapFeatureRow {
   coordinates: unknown
   sort_order: number | null
   layer_sort_order: number | null
+  updated_at: string | null
 }
 
 interface MapLayerMetaRow {
@@ -33,6 +34,7 @@ interface MapLayerMetaRow {
   category: string
   section_sort_order: number | null
   sort_order: number | null
+  updated_at: string | null
 }
 
 interface MapLayerPermissionRow {
@@ -203,6 +205,7 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
       status,
       color,
       style,
+      updatedAt: row.updated_at ?? undefined,
       geometry: 'point',
       position: row.coordinates,
     }
@@ -218,6 +221,7 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
       status,
       color,
       style,
+      updatedAt: row.updated_at ?? undefined,
       geometry: 'line',
       positions: row.coordinates,
     }
@@ -233,6 +237,7 @@ function toFeature(row: MapFeatureRow): GeometryFeature | null {
       status,
       color,
       style,
+      updatedAt: row.updated_at ?? undefined,
       geometry: 'polygon',
       positions: row.coordinates,
     }
@@ -353,6 +358,7 @@ function buildLayersFromFeatureRows(rows: MapFeatureRow[]): LayerConfig[] {
         category: row.category,
         sectionSortOrder: sectionSortByCategory.get(row.category) ?? 0,
         sortOrder: normalizeLayerSortOrder(row.layer_sort_order),
+        updatedAt: row.updated_at ?? undefined,
         features: [feature],
       })
       continue
@@ -366,6 +372,10 @@ function buildLayersFromFeatureRows(rows: MapFeatureRow[]): LayerConfig[] {
         normalizeLayerSortOrder(existingLayer.sortOrder),
         row.layer_sort_order,
       )
+    }
+
+    if (row.updated_at) {
+      existingLayer.updatedAt = row.updated_at
     }
 
     existingLayer.features.push(feature)
@@ -399,6 +409,7 @@ function buildLayersFromRowsWithMetadata(
       category: metadata.category,
       sectionSortOrder: normalizedSectionSort,
       sortOrder: normalizeLayerSortOrder(metadata.sort_order),
+      updatedAt: metadata.updated_at ?? undefined,
       features: [],
     })
   }
@@ -427,9 +438,14 @@ function buildLayersFromRowsWithMetadata(
         category: row.category,
         sectionSortOrder: sectionSortByCategory.get(row.category) ?? 0,
         sortOrder: normalizeLayerSortOrder(row.layer_sort_order),
+        updatedAt: row.updated_at ?? undefined,
         features: [feature],
       })
       continue
+    }
+
+    if (row.updated_at) {
+      existingLayer.updatedAt = row.updated_at
     }
 
     existingLayer.features.push(feature)
@@ -491,7 +507,7 @@ async function fetchRowsWithCurrentSchema(): Promise<
     const { data, error } = await supabase
       .from('map_features')
       .select(
-        'id,name,status,category,layer_id,layer_label,color,style,geometry_type,coordinates,sort_order,layer_sort_order',
+        'id,name,status,category,layer_id,layer_label,color,style,geometry_type,coordinates,sort_order,layer_sort_order,updated_at',
       )
       .is('deleted_at', null)
       .order('category')
@@ -540,7 +556,7 @@ async function fetchRowsWithCurrentSchemaWithoutStyle(): Promise<
     const { data, error } = await supabase
       .from('map_features')
       .select(
-        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order,layer_sort_order',
+        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order,layer_sort_order,updated_at',
       )
       .is('deleted_at', null)
       .order('category')
@@ -592,7 +608,7 @@ async function fetchRowsWithLegacySchema(): Promise<
     const { data, error } = await supabase
       .from('map_features')
       .select(
-        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order',
+        'id,name,status,category,layer_id,layer_label,color,geometry_type,coordinates,sort_order,updated_at',
       )
       .order('category')
       .order('layer_label')
@@ -637,7 +653,7 @@ async function fetchLayerMetadataRows(): Promise<
   for (;;) {
     const { data, error } = await supabase
       .from('map_layers')
-      .select('id,label,category,section_sort_order,sort_order')
+      .select('id,label,category,section_sort_order,sort_order,updated_at')
       .order('section_sort_order')
       .order('category')
       .order('sort_order')

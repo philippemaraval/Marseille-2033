@@ -20,6 +20,11 @@ interface VersionRow {
   created_at: string
 }
 
+interface UpdateTokenRow {
+  id: string
+  updated_at: string | null
+}
+
 interface SnapshotPayload {
   id: string
   name: string
@@ -94,6 +99,10 @@ export interface ImportFeatureInsert {
   coordinates: unknown
   sortOrder: number
   source?: string
+}
+
+export interface UpdateTokenMap {
+  [id: string]: string
 }
 
 function normalizeAdminError(message: string): string {
@@ -692,4 +701,91 @@ export async function importFeaturesToSupabase(
   }
 
   return { ok: true, data: { inserted } }
+}
+
+export async function fetchFeatureUpdateTokens(
+  featureIds: string[],
+): Promise<Result<UpdateTokenMap>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const normalizedIds = Array.from(
+    new Set(featureIds.map((entry) => entry.trim()).filter((entry) => entry.length > 0)),
+  )
+  if (normalizedIds.length === 0) {
+    return { ok: true, data: {} }
+  }
+
+  const rows: UpdateTokenRow[] = []
+  for (const chunk of chunkArray(normalizedIds, 200)) {
+    const { data, error } = await supabase
+      .from('map_features')
+      .select('id,updated_at')
+      .in('id', chunk)
+      .is('deleted_at', null)
+
+    if (error) {
+      return { ok: false, error: normalizeAdminError(error.message) }
+    }
+
+    rows.push(...((data || []) as UpdateTokenRow[]))
+  }
+
+  return {
+    ok: true,
+    data: Object.fromEntries(
+      rows
+        .filter(
+          (row): row is UpdateTokenRow =>
+            typeof row.id === 'string' &&
+            typeof row.updated_at === 'string' &&
+            row.updated_at.length > 0,
+        )
+        .map((row) => [row.id, row.updated_at]),
+    ) as UpdateTokenMap,
+  }
+}
+
+export async function fetchLayerUpdateTokens(
+  layerIds: string[],
+): Promise<Result<UpdateTokenMap>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const normalizedIds = Array.from(
+    new Set(layerIds.map((entry) => entry.trim()).filter((entry) => entry.length > 0)),
+  )
+  if (normalizedIds.length === 0) {
+    return { ok: true, data: {} }
+  }
+
+  const rows: UpdateTokenRow[] = []
+  for (const chunk of chunkArray(normalizedIds, 200)) {
+    const { data, error } = await supabase
+      .from('map_layers')
+      .select('id,updated_at')
+      .in('id', chunk)
+
+    if (error) {
+      return { ok: false, error: normalizeAdminError(error.message) }
+    }
+
+    rows.push(...((data || []) as UpdateTokenRow[]))
+  }
+
+  return {
+    ok: true,
+    data: Object.fromEntries(
+      rows
+        .filter(
+          (row): row is UpdateTokenRow =>
+            typeof row.id === 'string' &&
+            typeof row.updated_at === 'string' &&
+            row.updated_at.length > 0,
+        )
+        .map((row) => [row.id, row.updated_at]),
+    ) as UpdateTokenMap,
+  }
 }

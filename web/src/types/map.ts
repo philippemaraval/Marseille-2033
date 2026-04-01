@@ -47,6 +47,7 @@ export interface BaseFeature {
   status: StatusId
   color: string
   style?: FeatureStyle
+  updatedAt?: string
 }
 
 export interface PointFeature extends BaseFeature {
@@ -66,12 +67,32 @@ export interface PolygonFeature extends BaseFeature {
 
 export type GeometryFeature = PointFeature | LineFeature | PolygonFeature
 
+export interface StyleLibraryEntry {
+  id: string
+  label: string
+  style: FeatureStyle
+  color: string
+}
+
+export interface StyleRule {
+  id: string
+  styleId: string
+  statuses: StatusId[]
+  categories: string[]
+}
+
+export interface LayerStyleBinding {
+  baseStyleId: string | null
+  rules: StyleRule[]
+}
+
 export interface LayerConfig {
   id: string
   label: string
   category: string
   sectionSortOrder?: number
   sortOrder?: number
+  updatedAt?: string
   permissions?: LayerPermission
   features: GeometryFeature[]
 }

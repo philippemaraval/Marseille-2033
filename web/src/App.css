@@ -22,7 +22,7 @@
 
 .sidebar-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   margin: 0 0 12px;
 }
@@ -2973,5 +2973,143 @@
 
   .app-shell .map-pane > .shortcut-help-overlay {
     padding: 10px;
+  }
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sync-status.offline {
+  border-color: #f59e0b;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.panel-block textarea,
+.admin-panel textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 90px;
+  padding: 9px;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+  background: #fff;
+  color: var(--text);
+}
+
+.panel-block textarea:focus,
+.admin-panel textarea:focus {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
+}
+
+.journal-header-row,
+.journal-entry-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.journal-virtual-list {
+  border-top: 1px solid #eef2f7;
+  padding-top: 8px;
+}
+
+.journal-entry-card {
+  border-bottom: 1px solid #eef2f7;
+  padding: 8px 2px;
+  display: grid;
+  gap: 6px;
+}
+
+.journal-entry-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.journal-entry-meta span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.journal-mentions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.layer-folder-master-toggle {
+  font-size: 11px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.feature-list-virtualized {
+  border-top: 1px solid #eef2f7;
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.feature-list-row {
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.feature-line-label {
+  background: transparent;
+  border: 0;
+}
+
+.feature-line-label span {
+  display: inline-block;
+  padding: 1px 8px;
+  border-bottom: 2px solid currentColor;
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 999px;
+  color: #0f172a;
+  font-weight: 700;
+  white-space: nowrap;
+  transform-origin: center;
+}
+
+@media print {
+  .app-shell {
+    display: block;
+    height: auto;
+  }
+
+  .sidebar,
+  .map-floating-actions,
+  .map-welcome-hint,
+  .map-toolbar,
+  .map-cursor-hud,
+  .map-scale-hud,
+  .map-drawing-hud,
+  .shortcut-help-overlay,
+  .feature-context-menu {
+    display: none !important;
+  }
+
+  .map-pane {
+    height: 100vh;
+  }
+
+  .leaflet-control-container {
+    display: none !important;
   }
 }

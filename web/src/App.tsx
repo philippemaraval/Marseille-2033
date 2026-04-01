@@ -32,6 +32,8 @@ import {
   deleteLayerMetadata,
   deleteLayerSection,
   type FeatureVersion,
+  fetchFeatureUpdateTokens,
+  fetchLayerUpdateTokens,
   type ImportFeatureInsert,
   type TrashFeature,
   fetchFeatureVersions,
@@ -55,7 +57,16 @@ import {
 } from './data/importExport'
 import { fetchLayersFromSupabase } from './data/fetchSupabaseLayers'
 import { layers as fallbackLayers } from './data/layers'
+import {
+  enqueuePendingSyncMutation,
+  executePendingSyncMutation,
+  loadPendingSyncMutations,
+  savePendingSyncMutations,
+  type PendingSyncMutation,
+} from './data/offlineQueue'
 import { hasSupabase, supabase } from './lib/supabase'
+import { VirtualizedList } from './components/VirtualizedList'
+import { prefetchTileUrls } from './pwa/serviceWorker'
 import type {
   BuiltInPointIconId,
   FeatureStyle,
@@ -73,7 +84,7 @@ import type {
 import './App.css'
 
 type BaseMapId = 'osm' | 'satellite' | 'carto_light' | 'carto_dark' | 'topo'
-type SidebarTabId = 'calques' | 'carte' | 'outils'
+type SidebarTabId = 'calques' | 'carte' | 'journal' | 'outils'
 type DrawGeometry = GeometryFeature['geometry']
 type AdminMode = 'view' | 'create' | 'edit' | 'delete'
 type VisibleFeatureSortMode = 'alpha' | 'status' | 'layer' | 'category'
@@ -99,6 +110,22 @@ interface FeatureRef {
   category: string
   layerId: string
   layerLabel: string
+}
+
+interface MutableFeatureRecord {
+  id: string
+  name: string
+  status: StatusId
+  category: string
+  layer_id: string
+  layer_label: string
+  layer_sort_order: number
+  color: string
+  style: FeatureStyle | null
+  geometry_type: 'point' | 'line' | 'polygon'
+  coordinates: unknown
+  sort_order: number
+  source: string
 }
 
 interface CreateDraft {
@@ -252,6 +279,14 @@ interface MapCloneEntry {
   createdAt: number
 }
 
+interface JournalEntry {
+  id: string
+  createdAt: number
+  title: string
+  body: string
+  featureIds: string[]
+}
+
 interface LayerUniformStyle {
   enabled: boolean
   color: string
@@ -331,7 +366,9 @@ interface PersistedUiStateV1 {
   mapView?: {
     center: LatLngTuple
     zoom: number
+    bounds?: [LatLngTuple, LatLngTuple]
   } | null
+  journalEntries?: JournalEntry[]
 }
 
 interface SharedUrlState {
@@ -455,6 +492,9 @@ const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 const MAX_VIEW_BOOKMARKS = 30
 const MAX_LAYER_PRESETS = 30
 const MAX_MAP_CLONES = 40
+const MAX_JOURNAL_ENTRIES = 200
+const VISIBLE_FEATURE_LIST_HEIGHT = 420
+const VISIBLE_FEATURE_ROW_HEIGHT = 66
 const DEDICATED_ROUTE_LAYER_ID = 'itineraires_dedies'
 const DEDICATED_ROUTE_LAYER_LABEL = 'Itinéraires dédiés'
 const DEDICATED_ROUTE_CATEGORY = 'itinéraires'
@@ -786,6 +826,109 @@ function toCoordinates(geometry: DrawGeometry, points: LatLngTuple[]): unknown {
   return points
 }
 
+function buildFeatureFromMutableRecord(record: MutableFeatureRecord): GeometryFeature {
+  if (record.geometry_type === 'point') {
+    return {
+      id: record.id,
+      name: record.name,
+      status: record.status,
+      color: record.color,
+      style: record.style ?? undefined,
+      updatedAt: new Date().toISOString(),
+      geometry: 'point',
+      position: record.coordinates as [number, number],
+    }
+  }
+
+  if (record.geometry_type === 'line') {
+    return {
+      id: record.id,
+      name: record.name,
+      status: record.status,
+      color: record.color,
+      style: record.style ?? undefined,
+      updatedAt: new Date().toISOString(),
+      geometry: 'line',
+      positions: record.coordinates as [number, number][],
+    }
+  }
+
+  return {
+    id: record.id,
+    name: record.name,
+    status: record.status,
+    color: record.color,
+    style: record.style ?? undefined,
+    updatedAt: new Date().toISOString(),
+    geometry: 'polygon',
+    positions: record.coordinates as [number, number][],
+  }
+}
+
+function upsertFeatureIntoLayers(
+  currentLayers: LayerConfig[],
+  record: MutableFeatureRecord,
+): LayerConfig[] {
+  const nextFeature = buildFeatureFromMutableRecord(record)
+  const cleanedLayers = currentLayers
+    .map((layer) => ({
+      ...layer,
+      features: layer.features.filter((feature) => feature.id !== record.id),
+    }))
+    .filter((layer) => layer.features.length > 0 || layer.id === record.layer_id)
+
+  const existingLayerIndex = cleanedLayers.findIndex(
+    (layer) => layer.category === record.category && layer.id === record.layer_id,
+  )
+
+  if (existingLayerIndex >= 0) {
+    const nextLayers = [...cleanedLayers]
+    const targetLayer = nextLayers[existingLayerIndex]
+    nextLayers[existingLayerIndex] = {
+      ...targetLayer,
+      label: record.layer_label,
+      sortOrder: record.layer_sort_order,
+      updatedAt: new Date().toISOString(),
+      features: [...targetLayer.features, nextFeature],
+    }
+    return nextLayers
+  }
+
+  const nextSectionSortOrder =
+    cleanedLayers.length === 0
+      ? 0
+      : Math.max(
+          ...cleanedLayers.map((layer, index) => getSectionSortOrderValue(layer, index)),
+        ) + 1
+
+  return [
+    ...cleanedLayers,
+    {
+      id: record.layer_id,
+      label: record.layer_label,
+      category: record.category,
+      sectionSortOrder: nextSectionSortOrder,
+      sortOrder: record.layer_sort_order,
+      updatedAt: new Date().toISOString(),
+      permissions: {
+        isPublicVisible: true,
+        allowAuthenticatedWrite: true,
+        allowedEditorIds: [],
+      },
+      features: [nextFeature],
+    },
+  ]
+}
+
+function trashFeatureFromLayers(currentLayers: LayerConfig[], featureId: string): LayerConfig[] {
+  return currentLayers
+    .map((layer) => ({
+      ...layer,
+      features: layer.features.filter((feature) => feature.id !== featureId),
+    }))
+    .filter((layer) => layer.features.length > 0)
+}
+
 function isGeometryComplete(geometry: DrawGeometry, points: LatLngTuple[]): boolean {
   return points.length >= MIN_POINTS_REQUIRED[geometry]
 }
@@ -808,6 +951,10 @@ function normalizeFillOpacity(value: number): number {
 
 function normalizeLayerOpacity(value: number): number {
   return Math.round(clamp(value, 0.15, 1) * 100) / 100
+}
+
+function getAdaptiveScaleForZoom(zoom: number): number {
+  return clamp(0.58 + (zoom - 10) * 0.08, 0.58, 1.24)
 }
 
 function buildDefaultLayerUniformStyle(): LayerUniformStyle {
@@ -1318,6 +1465,15 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function buildAutoPointSequenceName(options: {
   layers: LayerConfig[]
   category: string
@@ -1389,7 +1545,11 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
-function parsePersistedMapView(value: unknown): { center: LatLngTuple; zoom: number } | null {
+function parsePersistedMapView(value: unknown): {
+  center: LatLngTuple
+  zoom: number
+  bounds?: [LatLngTuple, LatLngTuple]
+} | null {
   if (!isObjectRecord(value)) {
     return null
   }
@@ -1398,10 +1558,48 @@ function parsePersistedMapView(value: unknown): { center: LatLngTuple; zoom: num
   if (!center || typeof zoomRaw !== 'number' || !Number.isFinite(zoomRaw)) {
     return null
   }
+  const boundsValue = Array.isArray(value.bounds) ? value.bounds : null
+  const southWest = parseLatLngTuple(boundsValue?.[0])
+  const northEast = parseLatLngTuple(boundsValue?.[1])
   return {
     center: clampPointToMetropole(center),
     zoom: clamp(zoomRaw, 10, 18),
+    bounds:
+      southWest && northEast
+        ? [clampPointToMetropole(southWest), clampPointToMetropole(northEast)]
+        : undefined,
   }
+}
+
+function parseJournalEntries(value: unknown): JournalEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map<JournalEntry | null>((entry) => {
+      if (!isObjectRecord(entry)) {
+        return null
+      }
+      if (
+        typeof entry.id !== 'string' ||
+        typeof entry.createdAt !== 'number' ||
+        typeof entry.title !== 'string' ||
+        typeof entry.body !== 'string'
+      ) {
+        return null
+      }
+
+      return {
+        id: entry.id,
+        createdAt: entry.createdAt,
+        title: entry.title,
+        body: entry.body,
+        featureIds: parseStringArray(entry.featureIds),
+      }
+    })
+    .filter((entry): entry is JournalEntry => entry !== null)
+    .slice(0, MAX_JOURNAL_ENTRIES)
 }
 
 function parseStatusValue(value: unknown, fallback: StatusId): StatusId {
@@ -2245,8 +2443,100 @@ function featureIntersectsBounds(
   return points.some((point) => isPointInsideBounds(point, bounds))
 }
 
+function arePointListsEqual(left: LatLngTuple[], right: LatLngTuple[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every(
+    (point, index) =>
+      point[0] === right[index]?.[0] && point[1] === right[index]?.[1],
+  )
+}
+
+function longitudeToTileX(longitude: number, zoom: number): number {
+  return Math.floor(((longitude + 180) / 360) * Math.pow(2, zoom))
+}
+
+function latitudeToTileY(latitude: number, zoom: number): number {
+  const radians = (latitude * Math.PI) / 180
+  const mercator =
+    Math.log(Math.tan(Math.PI / 4 + radians / 2))
+  return Math.floor(
+    ((1 - mercator / Math.PI) / 2) * Math.pow(2, zoom),
+  )
+}
+
+function buildTilePrefetchUrls(
+  viewport: { bounds: [LatLngTuple, LatLngTuple]; zoom: number } | null,
+  template: string,
+): string[] {
+  if (!viewport) {
+    return []
+  }
+
+  const zoom = Math.max(0, Math.min(19, Math.round(viewport.zoom)))
+  const [southWest, northEast] = viewport.bounds
+  const minX = longitudeToTileX(southWest[1], zoom)
+  const maxX = longitudeToTileX(northEast[1], zoom)
+  const minY = latitudeToTileY(northEast[0], zoom)
+  const maxY = latitudeToTileY(southWest[0], zoom)
+  const urls: string[] = []
+
+  for (let x = minX - 1; x <= maxX + 1; x += 1) {
+    for (let y = minY - 1; y <= maxY + 1; y += 1) {
+      if (x < 0 || y < 0) {
+        continue
+      }
+      urls.push(
+        template
+          .replace('{s}', 'a')
+          .replace('{z}', String(zoom))
+          .replace('{x}', String(x))
+          .replace('{y}', String(y))
+          .replace('{r}', ''),
+      )
+    }
+  }
+
+  return urls
+}
+
 function midpoint(a: LatLngTuple, b: LatLngTuple): LatLngTuple {
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+}
+
+function computeLineLabelAnchor(points: LatLngTuple[]): { position: LatLngTuple; angle: number } {
+  if (points.length < 2) {
+    return { position: points[0] ?? MARSEILLE_CENTER, angle: 0 }
+  }
+
+  let bestSegment = {
+    position: midpoint(points[0], points[1]),
+    angle:
+      (Math.atan2(points[1][0] - points[0][0], points[1][1] - points[0][1]) * 180) /
+      Math.PI,
+    length: distanceMeters(points[0], points[1]),
+  }
+
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1]
+    const end = points[index]
+    const length = distanceMeters(start, end)
+    if (length <= bestSegment.length) {
+      continue
+    }
+    bestSegment = {
+      position: midpoint(start, end),
+      angle: (Math.atan2(end[0] - start[0], end[1] - start[1]) * 180) / Math.PI,
+      length,
+    }
+  }
+
+  return {
+    position: bestSegment.position,
+    angle: bestSegment.angle,
+  }
 }
 
 function clonePointList(points: LatLngTuple[]): LatLngTuple[] {
@@ -2648,6 +2938,26 @@ function App() {
   const [layerVisibilityPresets, setLayerVisibilityPresets] = useState<
     LayerVisibilityPreset[]
   >([])
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([])
+  const [journalDraftTitle, setJournalDraftTitle] = useState('')
+  const [journalDraftBody, setJournalDraftBody] = useState('')
+  const [hoveredJournalFeatureId, setHoveredJournalFeatureId] = useState<string | null>(
+    null,
+  )
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine,
+  )
+  const [pendingSyncMutations, setPendingSyncMutations] = useState<PendingSyncMutation[]>(
+    () => loadPendingSyncMutations(),
+  )
+  const [isFlushingPendingSync, setIsFlushingPendingSync] = useState(false)
+  const [draggedLayerTarget, setDraggedLayerTarget] = useState<{
+    category: string
+    layerId: string
+  } | null>(null)
+  const [draggedSectionCategory, setDraggedSectionCategory] = useState<string | null>(
+    null,
+  )
 
   const [sidebarTab, setSidebarTab] = useState<SidebarTabId>('calques')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
@@ -2734,12 +3044,15 @@ function App() {
   const [versionItems, setVersionItems] = useState<FeatureVersion[]>([])
   const [isVersionsLoading, setIsVersionsLoading] = useState(false)
   const hasHydratedUiStateRef = useRef(false)
-  const persistedMapViewRef = useRef<{ center: LatLngTuple; zoom: number } | null>(
-    null,
-  )
+  const persistedMapViewRef = useRef<{
+    center: LatLngTuple
+    zoom: number
+    bounds?: [LatLngTuple, LatLngTuple]
+  } | null>(null)
   const pendingMapViewRestoreRef = useRef<{
     center: LatLngTuple
     zoom: number
+    bounds?: [LatLngTuple, LatLngTuple]
   } | null>(null)
   const mapSearchRequestRef = useRef(0)
   const hasAutoLocatedOnLoadRef = useRef(false)
@@ -2888,6 +3201,32 @@ function App() {
   }, [syncSupabaseLayers])
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleOnline = () => {
+      setIsOnline(true)
+      if (loadPendingSyncMutations().length > 0) {
+        setAdminNotice('Connexion rétablie: valide l’envoi des modifications hors-ligne.')
+      }
+    }
+
+    const handleOffline = () => {
+      setIsOnline(false)
+      setAdminNotice('Mode hors-ligne: les écritures seront placées en attente.')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!isAdmin) {
       setIsShortcutHelpOpen(false)
     }
@@ -2969,6 +3308,9 @@ function App() {
       }
       if (persisted.viewBookmarks !== undefined) {
         setViewBookmarks(parseViewBookmarks(persisted.viewBookmarks))
+      }
+      if (persisted.journalEntries !== undefined) {
+        setJournalEntries(parseJournalEntries(persisted.journalEntries))
       }
       if (persisted.customPointIcons !== undefined) {
         setCustomPointIcons(parseCustomPointIcons(persisted.customPointIcons))
@@ -3231,9 +3573,20 @@ function App() {
     if (!mapView) {
       return
     }
-    mapInstance.setView(mapView.center, mapView.zoom, { animate: false })
+    if (mapView.bounds) {
+      mapInstance.fitBounds(mapView.bounds, { animate: false })
+    } else {
+      mapInstance.setView(mapView.center, mapView.zoom, { animate: false })
+    }
     pendingMapViewRestoreRef.current = null
   }, [mapInstance])
+
+  useEffect(() => {
+    if (!isOnline) {
+      return
+    }
+    prefetchTileUrls(buildTilePrefetchUrls(mapViewport, BASE_MAPS[baseMapId].url))
+  }, [baseMapId, isOnline, mapViewport])
 
   useEffect(() => {
     if (!hasHydratedUiStateRef.current || typeof window === 'undefined') {
@@ -3245,6 +3598,7 @@ function App() {
         ? {
             center: [mapViewport.center[0], mapViewport.center[1]] as LatLngTuple,
             zoom: mapViewport.zoom,
+            bounds: mapViewport.bounds,
           }
         : persistedMapViewRef.current
 
@@ -3297,6 +3651,7 @@ function App() {
       layerPresetDraftName,
       layerVisibilityPresets,
       viewBookmarks,
+      journalEntries,
       customPointIcons,
       isNorthArrowVisible,
       isPresentationMode,
@@ -3363,6 +3718,7 @@ function App() {
     statusFilter,
     routeProfile,
     viewBookmarks,
+    journalEntries,
   ])
 
   const sectionSortOrderByCategory = useMemo(() => {
@@ -3440,30 +3796,50 @@ function App() {
     return [...builtInOptions, ...customOptions]
   }, [customPointIcons])
 
+  const mapVisibleFeatureEntries = useMemo(
+    () =>
+      visibleLayers.flatMap((layer) =>
+        layer.features
+          .filter((feature) => isFeatureVisibleByFilters(feature))
+          .map((feature) => ({
+            feature,
+            category: layer.category,
+            layerId: layer.id,
+            layerLabel: layer.label,
+          })),
+      ),
+    [isFeatureVisibleByFilters, visibleLayers],
+  )
+
+  const bboxVisibleFeatureEntries = useMemo(
+    () =>
+      mapViewport
+        ? mapVisibleFeatureEntries.filter((entry) =>
+            featureIntersectsBounds(entry.feature, mapViewport.bounds),
+          )
+        : mapVisibleFeatureEntries,
+    [mapViewport, mapVisibleFeatureEntries],
+  )
+
   const visibleFeaturesBase = useMemo<VisibleFeature[]>(
     () =>
-      visibleLayers
-        .flatMap((layer) =>
-          layer.features
-            .filter((feature) => isFeatureVisibleByFilters(feature))
-            .map((feature) => {
-              const layerStyle = layerUniformStyles[toLayerLockKey(layer.category, layer.id)]
-              const displayColor =
-                layerStyle?.enabled && isHexColor(layerStyle.color)
-                  ? layerStyle.color
-                  : feature.color
-              return {
-                id: feature.id,
-                name: feature.name,
-                status: feature.status,
-                geometry: feature.geometry,
-                category: layer.category,
-                layerLabel: layer.label,
-                color: displayColor,
-              }
-            }),
-        ),
-    [isFeatureVisibleByFilters, layerUniformStyles, visibleLayers],
+      bboxVisibleFeatureEntries.map((entry) => {
+        const layerStyle = layerUniformStyles[toLayerLockKey(entry.category, entry.layerId)]
+        const displayColor =
+          layerStyle?.enabled && isHexColor(layerStyle.color)
+            ? layerStyle.color
+            : entry.feature.color
+        return {
+          id: entry.feature.id,
+          name: entry.feature.name,
+          status: entry.feature.status,
+          geometry: entry.feature.geometry,
+          category: entry.category,
+          layerLabel: entry.layerLabel,
+          color: displayColor,
+        }
+      }),
+    [bboxVisibleFeatureEntries, layerUniformStyles],
   )
 
   const visibleFeatures = useMemo<VisibleFeature[]>(() => {
@@ -3508,32 +3884,38 @@ function App() {
     })
   }, [featureSearchQuery, featureSortMode, visibleFeaturesBase])
 
-  const mapVisibleFeatureEntries = useMemo(
-    () =>
-      visibleLayers.flatMap((layer) =>
-        layer.features
-          .filter((feature) => isFeatureVisibleByFilters(feature))
-          .map((feature) => ({
-            feature,
-            category: layer.category,
-            layerId: layer.id,
-            layerLabel: layer.label,
-          })),
-      ),
-    [isFeatureVisibleByFilters, visibleLayers],
-  )
-
   const visibleExportEntries = useMemo<FeatureEnvelope[]>(
     () => mapVisibleFeatureEntries,
     [mapVisibleFeatureEntries],
   )
 
-  const visibleStatuses = useMemo(
+  const smartLegendItems = useMemo(
     () =>
-      Array.from(new Set(visibleFeaturesBase.map((feature) => feature.status))).sort(
-        (a, b) => STATUS_SORT_ORDER[a] - STATUS_SORT_ORDER[b],
-      ),
-    [visibleFeaturesBase],
+      Array.from(
+        bboxVisibleFeatureEntries.reduce((items, entry) => {
+          const layerStyle = layerUniformStyles[toLayerLockKey(entry.category, entry.layerId)]
+          const displayColor =
+            layerStyle?.enabled && isHexColor(layerStyle.color)
+              ? layerStyle.color
+              : entry.feature.color
+          const key = `${entry.layerId}::${entry.feature.geometry}::${displayColor}`
+          if (!items.has(key)) {
+            items.set(key, {
+              key,
+              label: `${entry.layerLabel} · ${DRAW_GEOMETRY_LABELS[entry.feature.geometry]}`,
+              color: displayColor,
+              status: entry.feature.status,
+              count: 0,
+            })
+          }
+          const current = items.get(key)
+          if (current) {
+            current.count += 1
+          }
+          return items
+        }, new Map<string, { key: string; label: string; color: string; status: StatusId; count: number }>()),
+      ).map(([, item]) => item),
+    [bboxVisibleFeatureEntries, layerUniformStyles],
   )
 
   const statusQuickCounts = useMemo(() => {
@@ -3761,6 +4143,20 @@ function App() {
   const selectedFeatureIdSet = useMemo(
     () => new Set(selectedFeatureIds),
     [selectedFeatureIds],
+  )
+  const highlightedFeatureIdSet = useMemo(() => {
+    const next = new Set(selectedFeatureIds)
+    if (hoveredJournalFeatureId) {
+      next.add(hoveredJournalFeatureId)
+    }
+    return next
+  }, [hoveredJournalFeatureId, selectedFeatureIds])
+  const featureNameById = useMemo(
+    () =>
+      new Map(
+        Array.from(featureById.entries()).map(([id, ref]) => [id, ref.feature.name]),
+      ),
+    [featureById],
   )
   const zoneSelectionBounds = useMemo(() => {
     if (!zoneSelectionStart || !zoneSelectionCurrent) {
@@ -4065,6 +4461,135 @@ function App() {
     [isAdmin],
   )
 
+  const queuePendingSync = useCallback((mutation: PendingSyncMutation, notice: string) => {
+    const nextQueue = enqueuePendingSyncMutation(mutation)
+    setPendingSyncMutations(nextQueue)
+    setAdminNotice(notice)
+  }, [])
+
+  const ensureRemoteFeaturesAreFresh = useCallback(
+    async (featureIds: string[]) => {
+      if (!hasSupabase || !supabase) {
+        return true
+      }
+
+      const normalizedIds = Array.from(
+        new Set(featureIds.map((entry) => entry.trim()).filter((entry) => entry.length > 0)),
+      )
+      if (normalizedIds.length === 0) {
+        return true
+      }
+
+      const result = await fetchFeatureUpdateTokens(normalizedIds)
+      if (!result.ok) {
+        setAdminNotice(`Erreur verrou sync: ${result.error}`)
+        return false
+      }
+
+      const hasConflict = normalizedIds.some((featureId) => {
+        const localUpdatedAt = featureById.get(featureId)?.feature.updatedAt
+        if (!localUpdatedAt) {
+          return false
+        }
+        return result.data[featureId] !== localUpdatedAt
+      })
+
+      if (!hasConflict) {
+        return true
+      }
+
+      await syncSupabaseLayers()
+      setAdminNotice(
+        'Conflit détecté: Supabase a changé. Rafraîchis la vue avant toute écriture.',
+      )
+      return false
+    },
+    [featureById, syncSupabaseLayers],
+  )
+
+  const ensureRemoteLayersAreFresh = useCallback(
+    async (layerIds: string[]) => {
+      if (!hasSupabase || !supabase) {
+        return true
+      }
+
+      const normalizedIds = Array.from(
+        new Set(layerIds.map((entry) => entry.trim()).filter((entry) => entry.length > 0)),
+      )
+      if (normalizedIds.length === 0) {
+        return true
+      }
+
+      const result = await fetchLayerUpdateTokens(normalizedIds)
+      if (!result.ok) {
+        setAdminNotice(`Erreur verrou calque: ${result.error}`)
+        return false
+      }
+
+      const hasConflict = normalizedIds.some((layerId) => {
+        const localUpdatedAt = layers.find((layer) => layer.id === layerId)?.updatedAt
+        if (!localUpdatedAt) {
+          return false
+        }
+        return result.data[layerId] !== localUpdatedAt
+      })
+
+      if (!hasConflict) {
+        return true
+      }
+
+      await syncSupabaseLayers()
+      setAdminNotice(
+        'Conflit détecté sur un calque: recharge les métadonnées avant modification.',
+      )
+      return false
+    },
+    [layers, syncSupabaseLayers],
+  )
+
+  const flushPendingSyncQueue = useCallback(async () => {
+    if (!hasSupabase || !supabase) {
+      setAdminNotice('Supabase non configuré: impossible de synchroniser la file offline.')
+      return
+    }
+    if (!isOnline) {
+      setAdminNotice('Connexion indisponible: la file offline reste en attente.')
+      return
+    }
+    if (pendingSyncMutations.length === 0) {
+      setAdminNotice('Aucune opération hors-ligne en attente.')
+      return
+    }
+
+    setIsFlushingPendingSync(true)
+    let remaining = [...pendingSyncMutations]
+
+    for (const mutation of pendingSyncMutations) {
+      const result = await executePendingSyncMutation(mutation)
+      if (!result.ok) {
+        savePendingSyncMutations(remaining)
+        setPendingSyncMutations(remaining)
+        setIsFlushingPendingSync(false)
+        if (result.conflict) {
+          await syncSupabaseLayers()
+        }
+        setAdminNotice(`Sync différée: ${result.error}`)
+        return
+      }
+
+      remaining = remaining.filter((entry) => entry.id !== mutation.id)
+    }
+
+    savePendingSyncMutations(remaining)
+    setPendingSyncMutations(remaining)
+    await syncSupabaseLayers()
+    if (isAdmin) {
+      await refreshTrash()
+    }
+    setIsFlushingPendingSync(false)
+    setAdminNotice('Synchronisation hors-ligne envoyée à Supabase.')
+  }, [isAdmin, isOnline, pendingSyncMutations, refreshTrash, syncSupabaseLayers])
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       void refreshTrash()
@@ -4082,6 +4607,67 @@ function App() {
       [id]: !current[id],
     }))
   }
+
+  const handleToggleFolderMaster = useCallback(
+    (category: string, nextActive: boolean) => {
+      setActiveLayers((current) => {
+        const next = { ...current }
+        for (const layer of layers) {
+          if (layer.category === category) {
+            next[layer.id] = nextActive
+          }
+        }
+        return next
+      })
+    },
+    [layers],
+  )
+
+  const handlePrintToPdf = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    mapInstance?.invalidateSize(false)
+    window.setTimeout(() => {
+      window.print()
+    }, 120)
+  }, [mapInstance])
+
+  const handleCreateJournalEntry = useCallback(() => {
+    const title = journalDraftTitle.trim()
+    const body = journalDraftBody.trim()
+    if (!title || !body) {
+      setAdminNotice('Journal: renseigne un titre et un texte.')
+      return
+    }
+
+    const normalizedBody = normalizeSearchTerm(body)
+    const featureIds = Array.from(featureById.entries())
+      .filter(([, ref]) =>
+        normalizedBody.includes(`@${normalizeSearchTerm(ref.feature.name)}`),
+      )
+      .map(([featureId]) => featureId)
+
+    setJournalEntries((current) =>
+      [
+        {
+          id: `journal_${crypto.randomUUID()}`,
+          createdAt: Date.now(),
+          title,
+          body,
+          featureIds: featureIds.slice(0, 24),
+        },
+        ...current,
+      ].slice(0, MAX_JOURNAL_ENTRIES),
+    )
+    setJournalDraftTitle('')
+    setJournalDraftBody('')
+    setAdminNotice(
+      featureIds.length > 0
+        ? `Entrée journal ajoutée avec ${featureIds.length} mention(s).`
+        : 'Entrée journal ajoutée.',
+    )
+  }, [featureById, journalDraftBody, journalDraftTitle])
 
   const handleLayerOpacityChange = useCallback(
     (category: string, layerId: string, value: number) => {
@@ -4461,14 +5047,6 @@ function App() {
           current.includes(featureId) ? current : [...current, featureId],
         )
       }
-      if (layerLocked) {
-        setEditDraft(null)
-        setEditPoints([])
-        setIsRedrawingEditGeometry(false)
-        setAdminNotice('Calque verrouillé: lecture seule.')
-        void refreshFeatureVersions(featureId)
-        return false
-      }
       const styleDraft = resolveDraftStyle(match.feature.geometry, match.feature.style)
       setEditDraft({
         name: match.feature.name,
@@ -4494,7 +5072,11 @@ function App() {
       })
       setEditPoints(getFeaturePoints(match.feature))
       setIsRedrawingEditGeometry(false)
-      setAdminNotice(null)
+      setAdminNotice(
+        layerLocked
+          ? 'Calque verrouillé: attributs modifiables, géométrie figée.'
+          : null,
+      )
       void refreshFeatureVersions(featureId)
       return true
     },
@@ -5584,7 +6166,7 @@ function App() {
     setIsSaving(true)
     setAdminNotice(null)
 
-    const insertPayload = {
+    const insertPayload: MutableFeatureRecord = {
       id,
       name: finalName,
       status: createDraft.status,
@@ -5599,6 +6181,49 @@ function App() {
       sort_order: sortOrder,
       source: 'manual',
     }
+
+    if (!isOnline) {
+      setLayers((current) => upsertFeatureIntoLayers(current, insertPayload))
+      setCreatePoints([])
+      setSelectedFeatureId(id)
+      setSelectedFeatureIds([id])
+      setEditDraft({
+        name: finalName,
+        status: createDraft.status,
+        color: createDraft.color,
+        category,
+        layerId,
+        layerLabel,
+        geometry: createDraft.geometry,
+        pointRadius: createDraft.pointRadius,
+        lineWidth: createDraft.lineWidth,
+        fillOpacity: createDraft.fillOpacity,
+        pointIcon: createDraft.pointIcon,
+        labelMode: createDraft.labelMode,
+        labelSize: createDraft.labelSize,
+        labelHalo: createDraft.labelHalo,
+        labelPriority: createDraft.labelPriority,
+        lineDash: createDraft.lineDash,
+        lineArrows: createDraft.lineArrows,
+        lineDirection: createDraft.lineDirection,
+        polygonPattern: createDraft.polygonPattern,
+        polygonBorderMode: createDraft.polygonBorderMode,
+      })
+      setEditPoints(geometryPointsSnapshot)
+      setIsRedrawingEditGeometry(false)
+      setAdminMode('edit')
+      queuePendingSync(
+        {
+          id: `pending_${crypto.randomUUID()}`,
+          createdAt: Date.now(),
+          type: 'insert_feature',
+          payload: insertPayload,
+        },
+        'Création hors-ligne enregistrée. Reconnecte-toi puis valide la synchronisation.',
+      )
+      return
+    }
+
     let didFallbackWithoutStyle = false
     let { error } = await supabase.from('map_features').insert(insertPayload)
     if (error && isMissingStyleColumnError(error.message)) {
@@ -5657,7 +6282,9 @@ function App() {
     isPointAutoNumberingEnabled,
     isLayerLocked,
     layers,
+    isOnline,
     pointAutoNumberPrefix,
+    queuePendingSync,
     refreshFeatureVersions,
     syncSupabaseLayers,
   ])
@@ -5669,11 +6296,16 @@ function App() {
     }
 
     const selectedRef = featureById.get(selectedFeatureId)
-    if (
-      selectedRef &&
-      isLayerLocked(selectedRef.category, selectedRef.layerId)
-    ) {
-      setAdminNotice('Calque verrouillé: édition interdite.')
+    const didGeometryChange = selectedRef
+      ? selectedRef.feature.geometry !== editDraft.geometry ||
+        !arePointListsEqual(getFeaturePoints(selectedRef.feature), editPoints)
+      : false
+    const didLayerChange = selectedRef
+      ? selectedRef.category !== editDraft.category.trim() ||
+        selectedRef.layerId !== toLayerId(editDraft.layerId, editDraft.layerLabel.trim())
+      : false
+    if (selectedRef && isLayerLocked(selectedRef.category, selectedRef.layerId) && didGeometryChange) {
+      setAdminNotice('Calque verrouillé: les sommets ne peuvent pas être déplacés.')
       return
     }
 
@@ -5699,8 +6331,8 @@ function App() {
       setAdminNotice('Nom, catégorie et calque sont obligatoires.')
       return
     }
-    if (isLayerLocked(category, layerId)) {
-      setAdminNotice('Calque cible verrouillé: déplace vers un calque non verrouillé.')
+    if (isLayerLocked(category, layerId) && (didGeometryChange || didLayerChange)) {
+      setAdminNotice('Calque cible verrouillé: déplacement géographique interdit.')
       return
     }
 
@@ -5714,11 +6346,22 @@ function App() {
       return
     }
     const stylePayload = toFeatureStylePayload(editDraft.geometry, editDraft)
+    const nextSortOrder =
+      targetLayer?.features.findIndex((feature) => feature.id === selectedFeatureId) !== -1
+        ? (targetLayer?.features.findIndex((feature) => feature.id === selectedFeatureId) ?? 0) +
+          1
+        : (targetLayer?.features.length ?? 0) + 1
+
+    const canWrite = await ensureRemoteFeaturesAreFresh([selectedFeatureId])
+    if (!canWrite) {
+      return
+    }
 
     setIsSaving(true)
     setAdminNotice(null)
 
-    const updatePayload = {
+    const updatePayload: MutableFeatureRecord = {
+      id: selectedFeatureId,
       name,
       status: editDraft.status,
       category,
@@ -5729,7 +6372,27 @@ function App() {
       style: stylePayload,
       geometry_type: editDraft.geometry,
       coordinates: toCoordinates(editDraft.geometry, editPoints),
+      sort_order: nextSortOrder,
+      source: selectedRef?.feature.id.startsWith('manual_') ? 'manual' : 'manual_update',
     }
+
+    if (!isOnline) {
+      setLayers((current) => upsertFeatureIntoLayers(current, updatePayload))
+      queuePendingSync(
+        {
+          id: `pending_${crypto.randomUUID()}`,
+          createdAt: Date.now(),
+          type: 'update_feature',
+          featureId: selectedFeatureId,
+          expectedUpdatedAt: selectedRef?.feature.updatedAt,
+          payload: updatePayload,
+        },
+        'Modification stockée hors-ligne. Reconnecte-toi puis valide l’envoi.',
+      )
+      setIsSaving(false)
+      return
+    }
+
     let didFallbackWithoutStyle = false
     let { error } = await supabase
       .from('map_features')
@@ -5767,7 +6430,10 @@ function App() {
     featureById,
     isAdmin,
     isLayerLocked,
+    isOnline,
     layers,
+    ensureRemoteFeaturesAreFresh,
+    queuePendingSync,
     refreshFeatureVersions,
     selectedFeatureId,
     syncSupabaseLayers,
@@ -5821,6 +6487,18 @@ function App() {
 
     if (colorPatch && !isHexColor(colorPatch)) {
       setAdminNotice('Couleur invalide pour édition en masse (#RRGGBB).')
+      return
+    }
+
+    const canWrite = await ensureRemoteFeaturesAreFresh(refs.map((ref) => ref.feature.id))
+    if (!canWrite) {
+      return
+    }
+
+    if (!isOnline) {
+      setAdminNotice(
+        'Édition en masse différée: reconnecte-toi puis applique les changements ciblés.',
+      )
       return
     }
 
@@ -5925,7 +6603,9 @@ function App() {
     featureById,
     isAdmin,
     isLayerLocked,
+    isOnline,
     layers,
+    ensureRemoteFeaturesAreFresh,
     refreshFeatureVersions,
     selectedFeatureId,
     selectedFeatureIds,
@@ -5954,6 +6634,11 @@ function App() {
         return
       }
 
+      const canWrite = await ensureRemoteFeaturesAreFresh(uniqueIds)
+      if (!canWrite) {
+        return
+      }
+
       const targetLabel =
         uniqueIds.length === 1
           ? `"${featureById.get(uniqueIds[0])?.feature.name ?? 'élément'}"`
@@ -5967,6 +6652,35 @@ function App() {
 
       setIsSaving(true)
       setAdminNotice(null)
+
+      if (!isOnline) {
+        const { data: authData } = supabase ? await supabase.auth.getUser() : { data: { user: null } }
+        const deletedBy = authData.user?.id ?? null
+        let nextQueue = pendingSyncMutations
+        for (const id of uniqueIds) {
+          nextQueue = enqueuePendingSyncMutation({
+            id: `pending_${crypto.randomUUID()}`,
+            createdAt: Date.now(),
+            type: 'trash_feature',
+            featureId: id,
+            expectedUpdatedAt: featureById.get(id)?.feature.updatedAt,
+            deletedBy,
+          })
+        }
+        setPendingSyncMutations(nextQueue)
+        setLayers((current) => uniqueIds.reduce(trashFeatureFromLayers, current))
+        setSelectedFeatureId(null)
+        setSelectedFeatureIds([])
+        setEditDraft(null)
+        setEditPoints([])
+        setIsRedrawingEditGeometry(false)
+        setVersionItems([])
+        setIsSaving(false)
+        setAdminNotice(
+          `${uniqueIds.length} élément(s) mis en attente hors-ligne. Valide l’envoi après reconnexion.`,
+        )
+        return
+      }
 
       let deletedCount = 0
       let firstError: string | null = null
@@ -6002,7 +6716,16 @@ function App() {
           : `${deletedCount} élément(s) déplacés dans la corbeille.`,
       )
     },
-    [featureById, isAdmin, isLayerLocked, refreshTrash, syncSupabaseLayers],
+    [
+      ensureRemoteFeaturesAreFresh,
+      featureById,
+      isAdmin,
+      isLayerLocked,
+      isOnline,
+      pendingSyncMutations,
+      refreshTrash,
+      syncSupabaseLayers,
+    ],
   )
 
   const handleDeleteFeature = useCallback(async () => {
@@ -6046,6 +6769,11 @@ function App() {
     }
     if (refs.some((ref) => isLayerLocked(ref.category, ref.layerId))) {
       setAdminNotice('Duplication refusée: la sélection contient un calque verrouillé.')
+      return
+    }
+
+    const canWrite = await ensureRemoteFeaturesAreFresh(refs.map((ref) => ref.feature.id))
+    if (!canWrite) {
       return
     }
 
@@ -6098,6 +6826,30 @@ function App() {
 
     setIsSaving(true)
     setAdminNotice(null)
+    if (!isOnline) {
+      let nextQueue = pendingSyncMutations
+      for (const row of rows) {
+        nextQueue = enqueuePendingSyncMutation({
+          id: `pending_${crypto.randomUUID()}`,
+          createdAt: Date.now(),
+          type: 'insert_feature',
+          payload: row,
+        })
+      }
+      setPendingSyncMutations(nextQueue)
+      setLayers((current) => rows.reduce(upsertFeatureIntoLayers, current))
+      const duplicatedIds = rows.map((row) => row.id)
+      setSelectedFeatureIds(duplicatedIds)
+      if (duplicatedIds[0]) {
+        void focusFeatureById(duplicatedIds[0], 'keep')
+      }
+      setAdminMode('edit')
+      setIsSaving(false)
+      setAdminNotice(
+        `${duplicatedIds.length} duplication(s) stockée(s) hors-ligne. Valide l’envoi après reconnexion.`,
+      )
+      return
+    }
     let didFallbackWithoutStyle = false
     let { error } = await supabase.from('map_features').insert(rows)
     if (error && isMissingStyleColumnError(error.message)) {
@@ -6138,7 +6890,10 @@ function App() {
     focusFeatureById,
     isAdmin,
     isLayerLocked,
+    isOnline,
     layers,
+    ensureRemoteFeaturesAreFresh,
+    pendingSyncMutations,
     selectedFeatureId,
     selectedFeatureIds,
     syncSupabaseLayers,
@@ -6757,6 +7512,108 @@ function App() {
     setAdminNotice('Version précédente restaurée.')
   }
 
+  const handleReorderLayersWithinCategory = useCallback(
+    async (category: string, sourceLayerId: string, targetLayerId: string) => {
+      const categoryLayers = layers
+        .filter((layer) => layer.category === category)
+        .sort((left, right) => {
+          const leftSort = getLayerSortOrderValue(left)
+          const rightSort = getLayerSortOrderValue(right)
+          if (leftSort !== rightSort) {
+            return leftSort - rightSort
+          }
+          return left.label.localeCompare(right.label, 'fr')
+        })
+
+      const sourceIndex = categoryLayers.findIndex((layer) => layer.id === sourceLayerId)
+      const targetIndex = categoryLayers.findIndex((layer) => layer.id === targetLayerId)
+      if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) {
+        return
+      }
+
+      const canWrite = await ensureRemoteLayersAreFresh(categoryLayers.map((layer) => layer.id))
+      if (!canWrite) {
+        return
+      }
+
+      const reordered = [...categoryLayers]
+      const [movedLayer] = reordered.splice(sourceIndex, 1)
+      reordered.splice(targetIndex, 0, movedLayer)
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await persistLayerSortOrder(
+        reordered.map((layer, index) => ({
+          category,
+          layerId: layer.id,
+          sortOrder: index,
+        })),
+      )
+
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur ordre manuel: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers()
+      setIsSaving(false)
+      setAdminNotice('Ordre du calque mis à jour.')
+    },
+    [ensureRemoteLayersAreFresh, layers, syncSupabaseLayers],
+  )
+
+  const handleReorderSections = useCallback(
+    async (sourceCategory: string, targetCategory: string) => {
+      if (sourceCategory === targetCategory) {
+        return
+      }
+
+      const sourceIndex = categories.findIndex((category) => category === sourceCategory)
+      const targetIndex = categories.findIndex((category) => category === targetCategory)
+      if (sourceIndex === -1 || targetIndex === -1) {
+        return
+      }
+
+      const canWrite = await ensureRemoteLayersAreFresh(
+        layers
+          .filter(
+            (layer) => layer.category === sourceCategory || layer.category === targetCategory,
+          )
+          .map((layer) => layer.id),
+      )
+      if (!canWrite) {
+        return
+      }
+
+      const reordered = [...categories]
+      const [movedCategory] = reordered.splice(sourceIndex, 1)
+      reordered.splice(targetIndex, 0, movedCategory)
+
+      setIsSaving(true)
+      setAdminNotice(null)
+
+      const result = await persistSectionSortOrder(
+        reordered.map((category, index) => ({
+          category,
+          sortOrder: index,
+        })),
+      )
+
+      if (!result.ok) {
+        setIsSaving(false)
+        setAdminNotice(`Erreur ordre section: ${result.error}`)
+        return
+      }
+
+      await syncSupabaseLayers()
+      setIsSaving(false)
+      setAdminNotice('Ordre des sections mis à jour.')
+    },
+    [categories, ensureRemoteLayersAreFresh, layers, syncSupabaseLayers],
+  )
+
   const handleMoveLayer = async (
     category: string,
     layerId: string,
@@ -6787,29 +7644,11 @@ function App() {
     if (targetIndex < 0 || targetIndex >= categoryLayers.length) {
       return
     }
-
-    const currentLayer = categoryLayers[currentIndex]
-    const targetLayer = categoryLayers[targetIndex]
-    const currentSort = getLayerSortOrderValue(currentLayer, currentIndex)
-    const targetSort = getLayerSortOrderValue(targetLayer, targetIndex)
-
-    setIsSaving(true)
-    setAdminNotice(null)
-
-    const result = await persistLayerSortOrder([
-      { category, layerId: currentLayer.id, sortOrder: targetSort },
-      { category, layerId: targetLayer.id, sortOrder: currentSort },
-    ])
-
-    if (!result.ok) {
-      setIsSaving(false)
-      setAdminNotice(`Erreur ordre manuel: ${result.error}`)
-      return
-    }
-
-    await syncSupabaseLayers()
-    setIsSaving(false)
-    setAdminNotice('Ordre du calque mis à jour.')
+    await handleReorderLayersWithinCategory(
+      category,
+      layerId,
+      categoryLayers[targetIndex].id,
+    )
   }
 
   const handleCreateLayer = useCallback(
@@ -7106,32 +7945,9 @@ function App() {
       if (targetIndex < 0 || targetIndex >= categories.length) {
         return
       }
-
-      const targetCategory = categories[targetIndex]
-      const currentOrder =
-        sectionSortOrderByCategory.get(category) ?? currentIndex
-      const targetOrder =
-        sectionSortOrderByCategory.get(targetCategory) ?? targetIndex
-
-      setIsSaving(true)
-      setAdminNotice(null)
-
-      const result = await persistSectionSortOrder([
-        { category, sortOrder: targetOrder },
-        { category: targetCategory, sortOrder: currentOrder },
-      ])
-
-      if (!result.ok) {
-        setIsSaving(false)
-        setAdminNotice(`Erreur ordre section: ${result.error}`)
-        return
-      }
-
-      await syncSupabaseLayers()
-      setIsSaving(false)
-      setAdminNotice('Ordre des sections mis à jour.')
+      await handleReorderSections(category, categories[targetIndex])
     },
-    [categories, isAdmin, sectionSortOrderByCategory, syncSupabaseLayers],
+    [categories, handleReorderSections, isAdmin],
   )
 
   const handleRenameSection = useCallback(
@@ -8231,7 +9047,8 @@ function App() {
               getCustomPointIconCatalogId(styleDraft.pointIcon) ?? '',
             )?.dataUrl ?? null
           : null
-        const isSelected = selectedFeatureIdSet.has(feature.id)
+        const adaptiveScale = getAdaptiveScaleForZoom(currentMapZoom)
+        const isSelected = highlightedFeatureIdSet.has(feature.id)
         const isFocusedSelection = selectedFeatureId === feature.id
         const isHiddenSelectedGeometry =
           isFocusedSelection &&
@@ -8299,7 +9116,8 @@ function App() {
 
         if (feature.geometry === 'point') {
           const radius = clamp(
-            normalizePointRadius(styleDraft.pointRadius) + (isSelected ? 2 : 0),
+            normalizePointRadius(styleDraft.pointRadius) * adaptiveScale +
+              (isSelected ? 2 : 0),
             3,
             24,
           )
@@ -8361,10 +9179,11 @@ function App() {
               key={feature.id}
               positions={feature.positions}
               eventHandlers={eventHandlers}
-              pathOptions={{
-                color: displayColor,
-                weight: clamp(
-                  normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1.3 : 0),
+                pathOptions={{
+                  color: displayColor,
+                  weight: clamp(
+                    normalizeLineWidth(styleDraft.lineWidth) * adaptiveScale +
+                      (isSelected ? 1.3 : 0),
                   1,
                   14,
                 ),
@@ -8399,7 +9218,7 @@ function App() {
                 ? '1 7'
                 : undefined
         const baseWeight = clamp(
-          normalizeLineWidth(styleDraft.lineWidth) + (isSelected ? 1 : 0),
+          normalizeLineWidth(styleDraft.lineWidth) * adaptiveScale + (isSelected ? 1 : 0),
           1,
           14,
         )
@@ -8533,6 +9352,8 @@ function App() {
       name: string
       color: string
       position: LatLngTuple
+      kind: 'default' | 'line'
+      angle: number
       labelSize: number
       labelHalo: boolean
       labelPriority: number
@@ -8544,7 +9365,7 @@ function App() {
     }
 
     const candidates: LabelEntry[] = []
-    for (const entry of mapVisibleFeatureEntries) {
+    for (const entry of bboxVisibleFeatureEntries) {
       const style = resolveDraftStyle(entry.feature.geometry, entry.feature.style)
       if (style.labelMode === 'hover') {
         continue
@@ -8555,11 +9376,17 @@ function App() {
         layerUniformStyle?.enabled && isHexColor(layerUniformStyle.color)
           ? layerUniformStyle.color
           : entry.feature.color
+      const lineAnchor =
+        entry.feature.geometry === 'line'
+          ? computeLineLabelAnchor(entry.feature.positions)
+          : null
       candidates.push({
         id: entry.feature.id,
         name: entry.feature.name,
         color: labelColor,
-        position: computeFeatureCenter(entry.feature),
+        position: lineAnchor?.position ?? computeFeatureCenter(entry.feature),
+        kind: lineAnchor ? 'line' : 'default',
+        angle: lineAnchor?.angle ?? 0,
         labelSize: normalizeLabelSize(style.labelSize),
         labelHalo: style.labelHalo,
         labelPriority: normalizeLabelPriority(style.labelPriority),
@@ -8595,7 +9422,7 @@ function App() {
     isLabelCollisionEnabled,
     isLabelOverlayActive,
     layerUniformStyles,
-    mapVisibleFeatureEntries,
+    bboxVisibleFeatureEntries,
   ])
 
   const mapScaleHud = useMemo(() => {
@@ -8676,12 +9503,38 @@ function App() {
           <button
             type="button"
             role="tab"
+            aria-selected={sidebarTab === 'journal'}
+            className={`sidebar-tab${sidebarTab === 'journal' ? ' active' : ''}`}
+            onClick={() => setSidebarTab('journal')}
+          >
+            Journal
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={sidebarTab === 'outils'}
             className={`sidebar-tab${sidebarTab === 'outils' ? ' active' : ''}`}
             onClick={() => setSidebarTab('outils')}
           >
             Outils
           </button>
+        </div>
+
+        <div className={`sync-status${isOnline ? '' : ' offline'}`}>
+          <span>{isOnline ? 'En ligne' : 'Hors-ligne'}</span>
+          {pendingSyncMutations.length > 0 ? (
+            <>
+              <strong>{pendingSyncMutations.length} action(s) en attente</strong>
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={() => void flushPendingSyncQueue()}
+                disabled={!isOnline || isFlushingPendingSync}
+              >
+                {isFlushingPendingSync ? 'Envoi...' : 'Valider l’envoi'}
+              </button>
+            </>
+          ) : null}
         </div>
 
         {isAdminPanelOpen && sidebarTab === 'outils' ? (
@@ -10123,6 +10976,93 @@ function App() {
           </section>
         ) : null}
 
+        {sidebarTab === 'journal' ? (
+          <>
+            <section className="panel-block">
+              <div className="journal-header-row">
+                <h2>Journal</h2>
+                <button
+                  type="button"
+                  className="ghost-button mini-button"
+                  onClick={handlePrintToPdf}
+                >
+                  Print to PDF
+                </button>
+              </div>
+              <p className="muted">
+                Rédige une note datée et mentionne des objets via `@NomObjet`.
+              </p>
+              <label>
+                Titre
+                <input
+                  type="text"
+                  value={journalDraftTitle}
+                  onChange={(event) => setJournalDraftTitle(event.target.value)}
+                  placeholder="Ex: Avancement nord-littoral"
+                />
+              </label>
+              <label>
+                Texte
+                <textarea
+                  value={journalDraftBody}
+                  onChange={(event) => setJournalDraftBody(event.target.value)}
+                  rows={5}
+                  placeholder="Ex: @Parc Longchamp devient prioritaire dans la phase 2."
+                />
+              </label>
+              <div className="admin-actions-row">
+                <button
+                  type="button"
+                  className="solid-button"
+                  onClick={handleCreateJournalEntry}
+                >
+                  Ajouter au journal
+                </button>
+              </div>
+            </section>
+
+            <section className="panel-block">
+              <h2>Entrées ({journalEntries.length})</h2>
+              {journalEntries.length === 0 ? (
+                <p className="muted">Aucune entrée narrative.</p>
+              ) : (
+                <VirtualizedList
+                  items={journalEntries}
+                  height={420}
+                  itemHeight={140}
+                  className="journal-virtual-list"
+                  getItemKey={(entry) => entry.id}
+                  renderItem={(entry) => (
+                    <article className="journal-entry-card">
+                      <div className="journal-entry-meta">
+                        <strong>{entry.title}</strong>
+                        <span>{new Date(entry.createdAt).toLocaleString('fr-FR')}</span>
+                      </div>
+                      <p>{entry.body}</p>
+                      {entry.featureIds.length > 0 ? (
+                        <div className="journal-mentions">
+                          {entry.featureIds.map((featureId) => (
+                            <button
+                              key={featureId}
+                              type="button"
+                              className="ghost-button mini-button"
+                              onMouseEnter={() => setHoveredJournalFeatureId(featureId)}
+                              onMouseLeave={() => setHoveredJournalFeatureId(null)}
+                              onClick={() => handleVisibleFeatureFocus(featureId)}
+                            >
+                              @{featureNameById.get(featureId) ?? featureId}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </article>
+                  )}
+                />
+              )}
+            </section>
+          </>
+        ) : null}
+
         {sidebarTab === 'calques' ? (
           <section className="panel-block">
             <h2>Calques</h2>
@@ -10251,10 +11191,29 @@ function App() {
             )
             const isFirstSection = sectionIndex <= 0
             const isLastSection = sectionIndex === categories.length - 1
+            const activeLayerCount = block.layers.filter((layer) => activeLayers[layer.id]).length
+            const allLayersActive =
+              block.layers.length > 0 && activeLayerCount === block.layers.length
 
             return (
               <div key={block.category} className="layer-group">
-                <div className="layer-folder-header">
+                <div
+                  className="layer-folder-header"
+                  draggable={isAdmin}
+                  onDragStart={() => setDraggedSectionCategory(block.category)}
+                  onDragOver={(event) => {
+                    if (draggedSectionCategory && draggedSectionCategory !== block.category) {
+                      event.preventDefault()
+                    }
+                  }}
+                  onDrop={() => {
+                    if (draggedSectionCategory && draggedSectionCategory !== block.category) {
+                      void handleReorderSections(draggedSectionCategory, block.category)
+                    }
+                    setDraggedSectionCategory(null)
+                  }}
+                  onDragEnd={() => setDraggedSectionCategory(null)}
+                >
                   <button
                     type="button"
                     className="layer-folder-toggle"
@@ -10264,10 +11223,19 @@ function App() {
                     <span>{collapsedLayerFolders[block.category] ? '▸' : '▾'}</span>
                     <strong>{block.category}</strong>
                     <small>
-                      {block.layers.filter((layer) => activeLayers[layer.id]).length}/
-                      {block.layers.length}
+                      {activeLayerCount}/{block.layers.length}
                     </small>
                   </button>
+                  <label className="control-row layer-folder-master-toggle">
+                    <input
+                      type="checkbox"
+                      checked={allLayersActive}
+                      onChange={(event) =>
+                        handleToggleFolderMaster(block.category, event.target.checked)
+                      }
+                    />
+                    <span>Master</span>
+                  </label>
                   {isAdmin ? (
                     <details className="layer-folder-actions">
                       <summary className="ghost-button mini-button">Actions</summary>
@@ -10353,6 +11321,37 @@ function App() {
                         <div
                           key={layer.id}
                           className={`layer-row${layerLocked ? ' is-locked' : ''}`}
+                          draggable={isAdmin}
+                          onDragStart={() =>
+                            setDraggedLayerTarget({
+                              category: block.category,
+                              layerId: layer.id,
+                            })
+                          }
+                          onDragOver={(event) => {
+                            if (
+                              draggedLayerTarget &&
+                              draggedLayerTarget.category === block.category &&
+                              draggedLayerTarget.layerId !== layer.id
+                            ) {
+                              event.preventDefault()
+                            }
+                          }}
+                          onDrop={() => {
+                            if (
+                              draggedLayerTarget &&
+                              draggedLayerTarget.category === block.category &&
+                              draggedLayerTarget.layerId !== layer.id
+                            ) {
+                              void handleReorderLayersWithinCategory(
+                                block.category,
+                                draggedLayerTarget.layerId,
+                                layer.id,
+                              )
+                            }
+                            setDraggedLayerTarget(null)
+                          }}
+                          onDragEnd={() => setDraggedLayerTarget(null)}
                         >
                           <label className="control-row">
                             <input
@@ -10768,18 +11767,23 @@ function App() {
           <>
             <section className="panel-block legend-block">
               <h2>Legende dynamique</h2>
-              {visibleStatuses.length === 0 ? (
-                <p className="muted">Aucun statut visible.</p>
+              <p className="muted">
+                Styles présents dans la BBox courante.
+              </p>
+              {smartLegendItems.length === 0 ? (
+                <p className="muted">Aucun style visible dans la vue.</p>
               ) : (
                 <ul className="legend-list">
-                  {visibleStatuses.map((status) => (
-                    <li key={status}>
+                  {smartLegendItems.map((item) => (
+                    <li key={item.key}>
                       <span
                         className="legend-dot"
-                        style={{ backgroundColor: STATUS_COLORS[status] }}
+                        style={{ backgroundColor: item.color }}
                         aria-hidden="true"
                       />
-                      <span>{STATUS_LABELS[status]}</span>
+                      <span>
+                        {item.label} · {item.count} objet(s) · {STATUS_LABELS[item.status]}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -10787,7 +11791,7 @@ function App() {
             </section>
 
             <section className="panel-block visible-list-block">
-              <h2>Elements visibles ({mapVisibleFeatureEntries.length})</h2>
+              <h2>Elements visibles ({bboxVisibleFeatureEntries.length})</h2>
               <div className="filters-grid">
                 <label>
                   Recherche rapide
@@ -10819,14 +11823,19 @@ function App() {
               </p>
               {visibleFeatures.length === 0 ? (
                 <p className="muted">
-                  {mapVisibleFeatureEntries.length === 0
+                  {bboxVisibleFeatureEntries.length === 0
                     ? 'Active un calque pour commencer.'
                     : 'Aucun élément ne correspond à la recherche.'}
                 </p>
               ) : (
-                <ul className="feature-list">
-                  {visibleFeatures.map((feature) => (
-                    <li key={feature.id}>
+                <VirtualizedList
+                  items={visibleFeatures}
+                  height={VISIBLE_FEATURE_LIST_HEIGHT}
+                  itemHeight={VISIBLE_FEATURE_ROW_HEIGHT}
+                  className="feature-list feature-list-virtualized"
+                  getItemKey={(feature) => feature.id}
+                  renderItem={(feature) => (
+                    <div className="feature-list-row">
                       <button
                         type="button"
                         className="feature-list-item-button"
@@ -10847,9 +11856,9 @@ function App() {
                           </p>
                         </div>
                       </button>
-                    </li>
-                  ))}
-                </ul>
+                    </div>
+                  )}
+                />
               )}
             </section>
           </>
@@ -11915,40 +12924,56 @@ function App() {
               ))
             : null}
           {visibleLayers.map((layer) => renderLayerFeatures(layer))}
-          {mapLabelEntries.map((entry) => (
-            <CircleMarker
-              key={`label-${entry.id}`}
-              center={entry.position}
-              radius={1}
-              interactive={false}
-              pathOptions={{
-                opacity: 0,
-                fillOpacity: 0,
-                stroke: false,
-              }}
-            >
-              <Tooltip
-                permanent
-                direction="top"
-                offset={[0, -4]}
-                className="feature-inline-label"
+          {mapLabelEntries.map((entry) =>
+            entry.kind === 'line' ? (
+              <Marker
+                key={`label-${entry.id}`}
+                position={entry.position}
+                interactive={false}
+                icon={
+                  new DivIcon({
+                    className: 'feature-line-label',
+                    html: `<span style="border-color:${entry.color};font-size:${entry.labelSize}px;text-shadow:${entry.labelHalo ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff' : 'none'};opacity:${clamp(entry.opacity + 0.1, 0.25, 1)};transform:rotate(${entry.angle}deg)">${escapeHtml(entry.name)}</span>`,
+                    iconSize: [220, entry.labelSize + 12],
+                    iconAnchor: [110, (entry.labelSize + 12) / 2],
+                  })
+                }
+              />
+            ) : (
+              <CircleMarker
+                key={`label-${entry.id}`}
+                center={entry.position}
+                radius={1}
+                interactive={false}
+                pathOptions={{
+                  opacity: 0,
+                  fillOpacity: 0,
+                  stroke: false,
+                }}
               >
-                <span
-                  className="feature-inline-label-text"
-                  style={{
-                    borderColor: entry.color,
-                    fontSize: `${entry.labelSize}px`,
-                    textShadow: entry.labelHalo
-                      ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff'
-                      : 'none',
-                    opacity: clamp(entry.opacity + 0.1, 0.25, 1),
-                  }}
+                <Tooltip
+                  permanent
+                  direction="top"
+                  offset={[0, -4]}
+                  className="feature-inline-label"
                 >
-                  {entry.name}
-                </span>
-              </Tooltip>
-            </CircleMarker>
-          ))}
+                  <span
+                    className="feature-inline-label-text"
+                    style={{
+                      borderColor: entry.color,
+                      fontSize: `${entry.labelSize}px`,
+                      textShadow: entry.labelHalo
+                        ? '0 0 2px #fff, 0 0 5px #fff, 0 0 8px #fff'
+                        : 'none',
+                      opacity: clamp(entry.opacity + 0.1, 0.25, 1),
+                    }}
+                  >
+                    {entry.name}
+                  </span>
+                </Tooltip>
+              </CircleMarker>
+            ),
+          )}
           {renderDraftGeometry()}
           {searchFocusPoint ? (
             <CircleMarker
