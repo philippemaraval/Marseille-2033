@@ -1,0 +1,245 @@
+.marseille-map-shell {
+  display: grid;
+  grid-template-columns: minmax(328px, 388px) minmax(0, 1fr);
+  width: 100%;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(226, 114, 91, 0.08), transparent 18%),
+    linear-gradient(135deg, #f7f4ef 0%, #f3eee6 54%, #ebe4da 100%);
+}
+
+.marseille-map-shell.is-presentation {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.marseille-sidebar {
+  min-width: 0;
+  border-right: 1px solid rgba(217, 221, 215, 0.95);
+  background:
+    radial-gradient(circle at 10% 12%, rgba(226, 114, 91, 0.08), transparent 22%),
+    radial-gradient(circle at 88% 76%, rgba(122, 135, 120, 0.08), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 244, 238, 0.98));
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.5);
+}
+
+.marseille-sidebar-inner {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 14px;
+  height: 100dvh;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.marseille-sidebar-header {
+  display: grid;
+  gap: 12px;
+}
+
+.marseille-sidebar-kicker-row,
+.marseille-sidebar-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.marseille-sidebar-kicker {
+  color: #8c4a3d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.marseille-sidebar-chip {
+  border: 1px solid rgba(226, 114, 91, 0.24);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(226, 114, 91, 0.1);
+  color: #8c4a3d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.marseille-sidebar-title-row h1 {
+  margin: 0;
+  color: #1f2933;
+  font-size: 28px;
+  line-height: 1.08;
+}
+
+.marseille-sidebar-title-row p {
+  margin: 8px 0 0;
+  max-width: 28ch;
+  color: #5b6471;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.marseille-admin-button,
+.marseille-sync-button {
+  border: 1px solid rgba(217, 221, 215, 0.95);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #1f2933;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.marseille-admin-button:hover,
+.marseille-sync-button:hover {
+  border-color: rgba(226, 114, 91, 0.32);
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(32, 28, 22, 0.08);
+  transform: translateY(-1px);
+}
+
+.marseille-sync-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+  transform: none;
+  box-shadow: none;
+}
+
+.marseille-sidebar-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.marseille-sidebar-tab {
+  border: 1px solid rgba(217, 221, 215, 0.95);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #55606d;
+  min-height: 40px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease;
+}
+
+.marseille-sidebar-tab.is-active {
+  border-color: rgba(226, 114, 91, 0.3);
+  background: rgba(226, 114, 91, 0.12);
+  color: #8c4a3d;
+}
+
+.marseille-sync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(217, 221, 215, 0.95);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.marseille-sync-banner strong {
+  display: block;
+  color: #1f2933;
+  font-size: 12px;
+}
+
+.marseille-sync-banner p {
+  margin: 4px 0 0;
+  color: #68707d;
+  font-size: 11px;
+}
+
+.marseille-sync-banner.is-offline {
+  border-color: rgba(226, 114, 91, 0.32);
+  background: rgba(226, 114, 91, 0.12);
+}
+
+.marseille-sidebar-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.marseille-sidebar-content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.marseille-sidebar-content::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(140, 148, 160, 0.34);
+  background-clip: padding-box;
+}
+
+.marseille-map-stage {
+  position: relative;
+  min-width: 0;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.44), transparent 26%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(77, 67, 55, 0.08));
+}
+
+.marseille-map-stage .map-pane,
+.marseille-map-stage .map {
+  height: 100%;
+}
+
+.marseille-map-stage .map-floating-actions {
+  left: auto;
+  right: 18px;
+  top: 18px;
+}
+
+.marseille-map-stage .map-toolbar {
+  border-radius: 12px;
+}
+
+@media (max-width: 1080px) {
+  .marseille-map-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .marseille-sidebar {
+    position: absolute;
+    inset: 12px auto 12px 12px;
+    width: min(388px, calc(100% - 24px));
+    z-index: 1200;
+    border: 1px solid rgba(217, 221, 215, 0.95);
+    border-radius: 16px;
+    box-shadow: 0 22px 48px rgba(32, 28, 22, 0.14);
+  }
+
+  .marseille-sidebar-inner {
+    height: calc(100dvh - 24px);
+  }
+}
+
+@media (max-width: 720px) {
+  .marseille-sidebar-inner {
+    padding: 14px;
+  }
+
+  .marseille-sidebar-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .marseille-sidebar-title-row {
+    flex-direction: column;
+  }
+
+  .marseille-map-stage .map-floating-actions {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+  }
+}

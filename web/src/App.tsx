@@ -65,6 +65,11 @@ import {
   type PendingSyncMutation,
 } from './data/offlineQueue'
 import { hasSupabase, supabase } from './lib/supabase'
+import {
+  MarseilleMapContainer,
+  MarseilleMapSidebar,
+  MarseilleMapStage,
+} from './components/MarseilleMapContainer'
 import { VirtualizedList } from './components/VirtualizedList'
 import { prefetchTileUrls } from './pwa/serviceWorker'
 import type {
@@ -2896,7 +2901,7 @@ async function fetchDedicatedRoute(options: {
 }
 
 function App() {
-  const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
+  const [baseMapId, setBaseMapId] = useState<BaseMapId>('satellite')
   const [layers, setLayers] = useState<LayerConfig[]>(fallbackLayers)
   const [activeLayers, setActiveLayers] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(fallbackLayers.map((layer) => [layer.id, false])),
@@ -9457,86 +9462,22 @@ function App() {
   }, [mapViewport])
 
   return (
-    <div className={`app-shell${isPresentationMode ? ' presentation-mode' : ''}`}>
-      {!isPresentationMode ? (
-        <aside className="sidebar">
-        <header className="sidebar-header">
-          <div className="title-row">
-            <div>
-              <p className="kicker">Marseille 2033</p>
-              <h1>Plateforme carte - V1</h1>
-            </div>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => {
-                setIsAdminPanelOpen((current) => !current)
-                setSidebarTab('outils')
-              }}
-            >
-              Admin
-            </button>
-          </div>
-
-          <p className="intro">Données source: Supabase</p>
-        </header>
-
-        <div className="sidebar-tabs" role="tablist" aria-label="Navigation panneau">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sidebarTab === 'calques'}
-            className={`sidebar-tab${sidebarTab === 'calques' ? ' active' : ''}`}
-            onClick={() => setSidebarTab('calques')}
-          >
-            Calques
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sidebarTab === 'carte'}
-            className={`sidebar-tab${sidebarTab === 'carte' ? ' active' : ''}`}
-            onClick={() => setSidebarTab('carte')}
-          >
-            Carte
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sidebarTab === 'journal'}
-            className={`sidebar-tab${sidebarTab === 'journal' ? ' active' : ''}`}
-            onClick={() => setSidebarTab('journal')}
-          >
-            Journal
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sidebarTab === 'outils'}
-            className={`sidebar-tab${sidebarTab === 'outils' ? ' active' : ''}`}
-            onClick={() => setSidebarTab('outils')}
-          >
-            Outils
-          </button>
-        </div>
-
-        <div className={`sync-status${isOnline ? '' : ' offline'}`}>
-          <span>{isOnline ? 'En ligne' : 'Hors-ligne'}</span>
-          {pendingSyncMutations.length > 0 ? (
-            <>
-              <strong>{pendingSyncMutations.length} action(s) en attente</strong>
-              <button
-                type="button"
-                className="ghost-button mini-button"
-                onClick={() => void flushPendingSyncQueue()}
-                disabled={!isOnline || isFlushingPendingSync}
-              >
-                {isFlushingPendingSync ? 'Envoi...' : 'Valider l’envoi'}
-              </button>
-            </>
-          ) : null}
-        </div>
-
+    <MarseilleMapContainer isPresentationMode={isPresentationMode}>
+      <MarseilleMapSidebar
+        isPresentationMode={isPresentationMode}
+        sidebarTab={sidebarTab}
+        onTabChange={setSidebarTab}
+        onToggleAdminPanel={() => {
+          setIsAdminPanelOpen((current) => !current)
+          setSidebarTab('outils')
+        }}
+        isOnline={isOnline}
+        pendingSyncCount={pendingSyncMutations.length}
+        isFlushingPendingSync={isFlushingPendingSync}
+        onFlushPendingSync={() => {
+          void flushPendingSyncQueue()
+        }}
+      >
         {isAdminPanelOpen && sidebarTab === 'outils' ? (
           <section className="panel-block admin-panel">
             <div className="admin-title-row">
@@ -11863,11 +11804,12 @@ function App() {
             </section>
           </>
         ) : null}
-        </aside>
-      ) : null}
+      </MarseilleMapSidebar>
 
-      <main
-        className={`map-pane${isDrawingOnMap ? ' is-drawing' : ''}${isAdmin && isZoneSelectionMode ? ' is-zone-selecting' : ''}${isMeasureMode ? ' is-measuring' : ''}`}
+      <MarseilleMapStage
+        isDrawingOnMap={isDrawingOnMap}
+        isZoneSelecting={isAdmin && isZoneSelectionMode}
+        isMeasuring={isMeasureMode}
       >
         <div className="map-floating-actions">
           <button
@@ -13100,8 +13042,8 @@ function App() {
           ) : null}
           {renderDirectEditHandles()}
         </MapContainer>
-      </main>
-    </div>
+      </MarseilleMapStage>
+    </MarseilleMapContainer>
   )
 }
 

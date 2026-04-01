@@ -1,18 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
 
 :root {
-  --text: #0f1724;
-  --muted: #55627a;
-  --bg: #edf2f8;
-  --panel-bg: rgba(252, 254, 255, 0.92);
-  --border: rgba(120, 136, 162, 0.28);
+  --text: #1f2933;
+  --muted: #68707d;
+  --bg: #f5f1eb;
+  --panel-bg: rgba(255, 255, 255, 0.88);
+  --border: rgba(217, 221, 215, 0.95);
   --surface-strong: #ffffff;
-  --surface-soft: rgba(246, 250, 255, 0.92);
-  --ring: rgba(58, 100, 166, 0.26);
-  --shadow-soft: 0 10px 24px rgba(15, 25, 44, 0.07);
-  --shadow-strong: 0 18px 42px rgba(15, 25, 44, 0.15);
+  --surface-soft: rgba(248, 244, 238, 0.92);
+  --ring: rgba(226, 114, 91, 0.22);
+  --accent: #e2725b;
+  --shadow-soft: 0 10px 24px rgba(32, 28, 22, 0.07);
+  --shadow-strong: 0 18px 42px rgba(32, 28, 22, 0.14);
 
-  font-family: 'Manrope', 'IBM Plex Sans', 'Nunito Sans', sans-serif;
+  font-family: 'Montserrat', 'Avenir Next', 'Nunito Sans', sans-serif;
   line-height: 1.42;
   font-weight: 400;
   font-synthesis: none;
@@ -36,9 +37,9 @@ body {
   margin: 0;
   color: var(--text);
   background:
-    radial-gradient(circle at 16% 10%, rgba(130, 164, 214, 0.16), transparent 34%),
-    radial-gradient(circle at 88% 84%, rgba(118, 148, 196, 0.13), transparent 32%),
-    linear-gradient(152deg, #f3f6fb 0%, #ebf1f8 54%, #e6edf7 100%);
+    radial-gradient(circle at 14% 12%, rgba(226, 114, 91, 0.08), transparent 28%),
+    radial-gradient(circle at 86% 82%, rgba(118, 126, 114, 0.08), transparent 24%),
+    linear-gradient(150deg, #f8f4ee 0%, #f2ece3 52%, #ece4da 100%);
   background-attachment: fixed;
 }
 
@@ -52,8 +53,8 @@ p {
 h1,
 h2,
 h3 {
-  font-family: 'Space Grotesk', 'Manrope', 'Avenir Next', sans-serif;
-  letter-spacing: -0.016em;
+  font-family: 'Montserrat', 'Avenir Next', sans-serif;
+  letter-spacing: -0.024em;
 }
 
 button,
@@ -63,6 +64,6 @@ select {
 }
 
 ::selection {
-  background: rgba(37, 99, 235, 0.2);
-  color: #0b2545;
+  background: rgba(226, 114, 91, 0.22);
+  color: #38150f;
 }
