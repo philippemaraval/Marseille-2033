@@ -44,6 +44,7 @@ import {
   renameLayerSection,
   restoreFeatureFromTrash,
   restorePreviousFeatureVersion,
+  updateLayerPermissions,
 } from './data/adminSupabase'
 import {
   buildGeoJsonExport,
@@ -60,6 +61,7 @@ import type {
   FeatureStyle,
   GeometryFeature,
   LabelMode,
+  LayerPermission,
   LayerConfig,
   LineDashStyle,
   LineDirectionMode,
@@ -187,6 +189,8 @@ interface FeatureContextMenuState {
 }
 
 type MeasureGeometry = 'line' | 'polygon'
+type RouteProfile = 'driving' | 'cycling' | 'walking'
+type RoutePickMode = 'start' | 'end'
 
 interface SnapSegment {
   start: LatLngTuple
@@ -241,6 +245,13 @@ interface StyleTemplateOption {
   patch: Partial<CreateDraft>
 }
 
+interface MapCloneEntry {
+  id: string
+  name: string
+  url: string
+  createdAt: number
+}
+
 interface LayerUniformStyle {
   enabled: boolean
   color: string
@@ -272,6 +283,7 @@ interface PersistedUiStateV1 {
   geometryFilter?: DrawGeometry | 'all'
   featureSearchQuery?: string
   featureSortMode?: VisibleFeatureSortMode
+  mapClones?: MapCloneEntry[]
   isLabelOverlayEnabled?: boolean
   isLabelCollisionEnabled?: boolean
   labelMinZoom?: number
@@ -315,6 +327,7 @@ interface PersistedUiStateV1 {
   showWelcomeHint?: boolean
   isMapToolbarCollapsed?: boolean
   isLocateOnLoadEnabled?: boolean
+  routeProfile?: RouteProfile
   mapView?: {
     center: LatLngTuple
     zoom: number
@@ -441,6 +454,22 @@ const MAX_CUSTOM_POINT_ICON_BYTES = 300 * 1024
 const UI_STATE_STORAGE_KEY = 'marseille2033.ui-state.v1'
 const MAX_VIEW_BOOKMARKS = 30
 const MAX_LAYER_PRESETS = 30
+const MAX_MAP_CLONES = 40
+const DEDICATED_ROUTE_LAYER_ID = 'itineraires_dedies'
+const DEDICATED_ROUTE_LAYER_LABEL = 'Itinéraires dédiés'
+const DEDICATED_ROUTE_CATEGORY = 'itinéraires'
+
+const ROUTE_PROFILE_LABELS: Record<RouteProfile, string> = {
+  driving: 'Voiture',
+  cycling: 'Vélo',
+  walking: 'Marche',
+}
+
+const ROUTE_PROFILE_COLORS: Record<RouteProfile, string> = {
+  driving: '#1d4ed8',
+  cycling: '#16a34a',
+  walking: '#b45309',
+}
 
 const BUILTIN_POINT_ICON_IDS: BuiltInPointIconId[] = [
   'dot',
@@ -1626,6 +1655,81 @@ function parseLayerOpacityByKey(value: unknown): Record<string, number> {
   return result
 }
 
+function buildDefaultLayerPermission(): LayerPermission {
+  return {
+    isPublicVisible: true,
+    allowAuthenticatedWrite: true,
+    allowedEditorIds: [],
+  }
+}
+
+function normalizeLayerPermission(value: LayerPermission | undefined): LayerPermission {
+  if (!value) {
+    return buildDefaultLayerPermission()
+  }
+  return {
+    isPublicVisible:
+      typeof value.isPublicVisible === 'boolean' ? value.isPublicVisible : true,
+    allowAuthenticatedWrite:
+      typeof value.allowAuthenticatedWrite === 'boolean'
+        ? value.allowAuthenticatedWrite
+        : true,
+    allowedEditorIds: Array.from(
+      new Set(
+        (Array.isArray(value.allowedEditorIds) ? value.allowedEditorIds : [])
+          .filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0),
+      ),
+    ),
+  }
+}
+
+function parseMapClones(value: unknown): MapCloneEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const items: MapCloneEntry[] = []
+  for (const item of value) {
+    if (!isObjectRecord(item)) {
+      continue
+    }
+    const id =
+      typeof item.id === 'string' && item.id.trim().length > 0
+        ? item.id
+        : `map_clone_${crypto.randomUUID()}`
+    const name =
+      typeof item.name === 'string' && item.name.trim().length > 0
+        ? item.name.trim()
+        : `Clone ${items.length + 1}`
+    const url =
+      typeof item.url === 'string' && item.url.trim().length > 0
+        ? item.url.trim()
+        : null
+    if (!url) {
+      continue
+    }
+    const createdAt =
+      typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+        ? item.createdAt
+        : Date.now()
+    items.push({
+      id,
+      name,
+      url,
+      createdAt,
+    })
+  }
+  return items.slice(0, MAX_MAP_CLONES)
+}
+
+function parseRouteProfileValue(value: unknown, fallback: RouteProfile): RouteProfile {
+  if (value === 'driving' || value === 'cycling' || value === 'walking') {
+    return value
+  }
+  return fallback
+}
+
 function parseLayerUniformStyles(value: unknown): Record<string, LayerUniformStyle> {
   if (!isObjectRecord(value)) {
     return {}
@@ -2244,6 +2348,22 @@ function formatDistance(valueMeters: number): string {
   return `${Math.round(valueMeters)} m`
 }
 
+function formatDuration(valueSeconds: number): string {
+  if (!Number.isFinite(valueSeconds) || valueSeconds <= 0) {
+    return '0 min'
+  }
+  const totalMinutes = Math.round(valueSeconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours <= 0) {
+    return `${minutes} min`
+  }
+  if (minutes === 0) {
+    return `${hours} h`
+  }
+  return `${hours} h ${minutes} min`
+}
+
 function formatSurface(valueSquareMeters: number): string {
   if (!Number.isFinite(valueSquareMeters) || valueSquareMeters <= 0) {
     return '0 m²'
@@ -2413,6 +2533,78 @@ function makeLineArrowIcon(color: string, angle: number): DivIcon {
   })
 }
 
+async function fetchDedicatedRoute(options: {
+  start: LatLngTuple
+  end: LatLngTuple
+  profile: RouteProfile
+}): Promise<
+  | {
+      ok: true
+      line: LatLngTuple[]
+      distanceMeters: number
+      durationSeconds: number
+      source: 'osrm'
+    }
+  | {
+      ok: false
+      error: string
+    }
+> {
+  const profileSegment =
+    options.profile === 'cycling'
+      ? 'bike'
+      : options.profile === 'walking'
+        ? 'foot'
+        : 'driving'
+  const coordinates = `${options.start[1].toFixed(6)},${options.start[0].toFixed(6)};${options.end[1].toFixed(6)},${options.end[0].toFixed(6)}`
+  const url = `https://router.project-osrm.org/route/v1/${profileSegment}/${coordinates}?overview=full&geometries=geojson&steps=false`
+
+  try {
+    const response = await fetch(url)
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status}` }
+    }
+    const data = (await response.json()) as {
+      routes?: Array<{
+        distance?: number
+        duration?: number
+        geometry?: { coordinates?: number[][] }
+      }>
+    }
+    const firstRoute = Array.isArray(data.routes) ? data.routes[0] : null
+    if (!firstRoute || !firstRoute.geometry || !Array.isArray(firstRoute.geometry.coordinates)) {
+      return { ok: false, error: 'Aucun itinéraire disponible.' }
+    }
+    const line = firstRoute.geometry.coordinates
+      .map((entry) =>
+        Array.isArray(entry) && entry.length >= 2
+          ? parseLatLngTuple([Number(entry[1]), Number(entry[0])])
+          : null,
+      )
+      .filter((entry): entry is LatLngTuple => entry !== null)
+      .map((entry) => clampPointToMetropole(entry))
+    if (line.length < 2) {
+      return { ok: false, error: 'Tracé routier invalide.' }
+    }
+    return {
+      ok: true,
+      line,
+      distanceMeters:
+        typeof firstRoute.distance === 'number' && Number.isFinite(firstRoute.distance)
+          ? firstRoute.distance
+          : distanceMeters(options.start, options.end),
+      durationSeconds:
+        typeof firstRoute.duration === 'number' && Number.isFinite(firstRoute.duration)
+          ? firstRoute.duration
+          : 0,
+      source: 'osrm',
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'erreur réseau'
+    return { ok: false, error: message }
+  }
+}
+
 function App() {
   const [baseMapId, setBaseMapId] = useState<BaseMapId>('osm')
   const [layers, setLayers] = useState<LayerConfig[]>(fallbackLayers)
@@ -2450,6 +2642,7 @@ function App() {
   const [searchFocusPoint, setSearchFocusPoint] = useState<LatLngTuple | null>(null)
   const [bookmarkDraftName, setBookmarkDraftName] = useState('')
   const [viewBookmarks, setViewBookmarks] = useState<ViewBookmark[]>([])
+  const [mapClones, setMapClones] = useState<MapCloneEntry[]>([])
   const [layerPanelSearchQuery, setLayerPanelSearchQuery] = useState('')
   const [layerPresetDraftName, setLayerPresetDraftName] = useState('')
   const [layerVisibilityPresets, setLayerVisibilityPresets] = useState<
@@ -2465,6 +2658,7 @@ function App() {
   const [adminEmail, setAdminEmail] = useState('philippe.maraval@protonmail.com')
   const [adminPassword, setAdminPassword] = useState('')
   const [adminUserEmail, setAdminUserEmail] = useState<string | null>(null)
+  const [adminUserId, setAdminUserId] = useState<string | null>(null)
 
   const [adminMode, setAdminMode] = useState<AdminMode>('view')
   const [adminNotice, setAdminNotice] = useState<string | null>(null)
@@ -2485,6 +2679,16 @@ function App() {
     useState<LatLngTuple | null>(null)
   const [featureContextMenu, setFeatureContextMenu] =
     useState<FeatureContextMenuState | null>(null)
+  const [routeProfile, setRouteProfile] = useState<RouteProfile>('driving')
+  const [routePickMode, setRoutePickMode] = useState<RoutePickMode | null>(null)
+  const [routeStart, setRouteStart] = useState<LatLngTuple | null>(null)
+  const [routeEnd, setRouteEnd] = useState<LatLngTuple | null>(null)
+  const [routeLine, setRouteLine] = useState<LatLngTuple[]>([])
+  const [routeDistanceMeters, setRouteDistanceMeters] = useState(0)
+  const [routeDurationSeconds, setRouteDurationSeconds] = useState(0)
+  const [isRouting, setIsRouting] = useState(false)
+  const [routeSource, setRouteSource] = useState<'osrm' | 'fallback' | null>(null)
+  const [routeNotice, setRouteNotice] = useState<string | null>(null)
   const [isMeasureMode, setIsMeasureMode] = useState(false)
   const [measureGeometry, setMeasureGeometry] = useState<MeasureGeometry>('line')
   const [measurePoints, setMeasurePoints] = useState<LatLngTuple[]>([])
@@ -2544,7 +2748,7 @@ function App() {
     isAdmin &&
     (adminMode === 'create' || (adminMode === 'edit' && isRedrawingEditGeometry))
   const isMapInteractionCaptureEnabled =
-    isDrawingOnMap || isMeasureMode || (isAdmin && isZoneSelectionMode)
+    isDrawingOnMap || isMeasureMode || routePickMode !== null || (isAdmin && isZoneSelectionMode)
   const isDirectGeometryEditing =
     isAdmin && adminMode === 'edit' && !isRedrawingEditGeometry
 
@@ -2649,6 +2853,7 @@ function App() {
       }
       setIsAdmin(Boolean(data.session?.user))
       setAdminUserEmail(data.session?.user?.email ?? null)
+      setAdminUserId(data.session?.user?.id ?? null)
       setIsAuthReady(true)
     }
 
@@ -2659,6 +2864,7 @@ function App() {
     } = sb.auth.onAuthStateChange((_event, session) => {
       setIsAdmin(Boolean(session?.user))
       setAdminUserEmail(session?.user?.email ?? null)
+      setAdminUserId(session?.user?.id ?? null)
     })
 
     return () => {
@@ -2814,6 +3020,9 @@ function App() {
       setFeatureSortMode((current) =>
         parseFeatureSortModeValue(persisted.featureSortMode, current),
       )
+      if (persisted.mapClones !== undefined) {
+        setMapClones(parseMapClones(persisted.mapClones))
+      }
 
       const persistedLabelOverlay = parseBooleanValue(persisted.isLabelOverlayEnabled)
       if (persistedLabelOverlay !== null) {
@@ -2950,6 +3159,9 @@ function App() {
       if (persistedLocateOnLoad !== null) {
         setIsLocateOnLoadEnabled(persistedLocateOnLoad)
       }
+      setRouteProfile((current) =>
+        parseRouteProfileValue(persisted.routeProfile, current),
+      )
 
       if (persisted.localHistoryPast !== undefined) {
         setLocalHistoryPast(parseLocalHistoryEntries(persisted.localHistoryPast))
@@ -3050,6 +3262,7 @@ function App() {
       geometryFilter,
       featureSearchQuery,
       featureSortMode,
+      mapClones,
       isLabelOverlayEnabled,
       isLabelCollisionEnabled,
       labelMinZoom,
@@ -3090,6 +3303,7 @@ function App() {
       showWelcomeHint,
       isMapToolbarCollapsed,
       isLocateOnLoadEnabled,
+      routeProfile,
       mapView: mapView ?? null,
     }
 
@@ -3114,6 +3328,7 @@ function App() {
     editPoints,
     featureSearchQuery,
     featureSortMode,
+    mapClones,
     geometryFilter,
     importDraft,
     isAdminPanelOpen,
@@ -3146,6 +3361,7 @@ function App() {
     showWelcomeHint,
     snapToleranceMeters,
     statusFilter,
+    routeProfile,
     viewBookmarks,
   ])
 
@@ -3501,10 +3717,35 @@ function App() {
     return lookup
   }, [layers])
 
+  const getLayerPermission = useCallback(
+    (category: string, layerId: string): LayerPermission => {
+      const layer = layers.find(
+        (item) => item.category === category && item.id === layerId,
+      )
+      return normalizeLayerPermission(layer?.permissions)
+    },
+    [layers],
+  )
+
+  const isLayerWritableByPermission = useCallback(
+    (category: string, layerId: string): boolean => {
+      const permission = getLayerPermission(category, layerId)
+      if (permission.allowAuthenticatedWrite) {
+        return true
+      }
+      if (!adminUserId) {
+        return false
+      }
+      return permission.allowedEditorIds.includes(adminUserId)
+    },
+    [adminUserId, getLayerPermission],
+  )
+
   const isLayerLocked = useCallback(
     (category: string, layerId: string) =>
-      Boolean(lockedLayers[toLayerLockKey(category, layerId)]),
-    [lockedLayers],
+      Boolean(lockedLayers[toLayerLockKey(category, layerId)]) ||
+      !isLayerWritableByPermission(category, layerId),
+    [isLayerWritableByPermission, lockedLayers],
   )
 
   const getLayerOpacity = useCallback(
@@ -3962,6 +4203,87 @@ function App() {
     })
   }, [])
 
+  const handleUpdateLayerPermission = useCallback(
+    async (
+      category: string,
+      layerId: string,
+      patch: Partial<LayerPermission>,
+    ) => {
+      if (!isAdmin) {
+        setAdminNotice('Connexion admin requise.')
+        return
+      }
+      const currentPermission = getLayerPermission(category, layerId)
+      const nextPermission: LayerPermission = {
+        isPublicVisible:
+          typeof patch.isPublicVisible === 'boolean'
+            ? patch.isPublicVisible
+            : currentPermission.isPublicVisible,
+        allowAuthenticatedWrite:
+          typeof patch.allowAuthenticatedWrite === 'boolean'
+            ? patch.allowAuthenticatedWrite
+            : currentPermission.allowAuthenticatedWrite,
+        allowedEditorIds:
+          patch.allowedEditorIds !== undefined
+            ? Array.from(
+                new Set(
+                  patch.allowedEditorIds
+                    .map((entry) => entry.trim())
+                    .filter((entry) => entry.length > 0),
+                ),
+              )
+            : currentPermission.allowedEditorIds,
+      }
+      const result = await updateLayerPermissions({
+        layerId,
+        isPublicVisible: nextPermission.isPublicVisible,
+        allowAuthenticatedWrite: nextPermission.allowAuthenticatedWrite,
+        allowedEditorIds: nextPermission.allowedEditorIds,
+      })
+      if (!result.ok) {
+        setAdminNotice(`Erreur permissions: ${result.error}`)
+        return
+      }
+      setLayers((current) =>
+        current.map((layer) =>
+          layer.id === layerId && layer.category === category
+            ? {
+                ...layer,
+                permissions: normalizeLayerPermission(result.data),
+              }
+            : layer,
+        ),
+      )
+      setAdminNotice('Permissions calque mises à jour.')
+    },
+    [getLayerPermission, isAdmin],
+  )
+
+  const handlePromptLayerEditors = useCallback(
+    async (category: string, layerId: string) => {
+      if (typeof window === 'undefined') {
+        return
+      }
+      const currentPermission = getLayerPermission(category, layerId)
+      const initialValue = currentPermission.allowedEditorIds.join(', ')
+      const input = window.prompt(
+        'UUID éditeurs autorisés (séparés par virgule). Laisse vide pour aucun.',
+        initialValue,
+      )
+      if (input === null) {
+        return
+      }
+      const nextEditors = input
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+      await handleUpdateLayerPermission(category, layerId, {
+        allowedEditorIds: nextEditors,
+      })
+    },
+    [getLayerPermission, handleUpdateLayerPermission],
+  )
+
   const toggleLayerFolder = useCallback((category: string) => {
     setCollapsedLayerFolders((current) => ({
       ...current,
@@ -4220,6 +4542,172 @@ function App() {
     }
     mapInstance.flyTo(MARSEILLE_CENTER, 12, { duration: 0.45 })
   }, [mapInstance])
+
+  const handleBeginRoutePick = useCallback((mode: RoutePickMode) => {
+    setRoutePickMode(mode)
+    setRouteNotice(null)
+    setIsMeasureMode(false)
+    setSnapPreview(null)
+    if (mode === 'start') {
+      setNavigationNotice('Itinéraire: clique sur la carte pour définir le départ.')
+      return
+    }
+    if (mode === 'end') {
+      setNavigationNotice('Itinéraire: clique sur la carte pour définir l’arrivée.')
+      return
+    }
+    setNavigationNotice(null)
+  }, [])
+
+  const handleResetRoute = useCallback(() => {
+    setRoutePickMode(null)
+    setRouteStart(null)
+    setRouteEnd(null)
+    setRouteLine([])
+    setRouteDistanceMeters(0)
+    setRouteDurationSeconds(0)
+    setRouteSource(null)
+    setRouteNotice(null)
+  }, [])
+
+  const handleSwapRouteEndpoints = useCallback(() => {
+    if (!routeStart || !routeEnd) {
+      return
+    }
+    setRouteStart(routeEnd)
+    setRouteEnd(routeStart)
+  }, [routeEnd, routeStart])
+
+  const handleSaveRouteToDedicatedLayer = useCallback(async () => {
+    if (!supabase || !isAdmin) {
+      setAdminNotice('Connexion admin requise.')
+      return
+    }
+    if (routeLine.length < 2 || !routeStart || !routeEnd) {
+      setAdminNotice('Itinéraire incomplet: définis départ et arrivée.')
+      return
+    }
+
+    const siblingLayers = layers.filter(
+      (layer) => layer.category === DEDICATED_ROUTE_CATEGORY,
+    )
+    const existingRouteLayer = siblingLayers.find(
+      (layer) => layer.id === DEDICATED_ROUTE_LAYER_ID,
+    )
+    const layerSortOrder =
+      existingRouteLayer !== undefined
+        ? getLayerSortOrderValue(existingRouteLayer)
+        : siblingLayers.reduce(
+            (maxOrder, layer, index) =>
+              Math.max(maxOrder, getLayerSortOrderValue(layer, index)),
+            -1,
+          ) + 1
+    const sortOrder =
+      (layers.find((layer) => layer.id === DEDICATED_ROUTE_LAYER_ID)?.features.length ??
+        0) + 1
+
+    const lineColor = ROUTE_PROFILE_COLORS[routeProfile]
+    const routeName = `Itinéraire ${ROUTE_PROFILE_LABELS[routeProfile]} ${new Date().toLocaleString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`
+
+    const result = await importFeaturesToSupabase([
+      {
+        id: `route_${crypto.randomUUID()}`,
+        name: routeName,
+        status: 'propose',
+        category: DEDICATED_ROUTE_CATEGORY,
+        layerId: DEDICATED_ROUTE_LAYER_ID,
+        layerLabel: DEDICATED_ROUTE_LAYER_LABEL,
+        layerSortOrder,
+        color: lineColor,
+        style: {
+          lineWidth: 4,
+          lineDash: 'solid',
+          lineDirection: 'forward',
+          lineArrows: false,
+          labelMode: 'hover',
+          labelSize: 12,
+          labelHalo: true,
+          labelPriority: 65,
+        },
+        geometryType: 'line',
+        coordinates: routeLine,
+        sortOrder,
+        source: routeSource === 'osrm' ? 'route_osrm' : 'route_manual',
+      },
+    ])
+
+    if (!result.ok) {
+      setAdminNotice(`Erreur itinéraire: ${result.error}`)
+      return
+    }
+
+    await syncSupabaseLayers(DEDICATED_ROUTE_LAYER_ID)
+    setActiveLayers((current) => ({
+      ...current,
+      [DEDICATED_ROUTE_LAYER_ID]: true,
+    }))
+    setAdminNotice('Itinéraire enregistré dans le calque dédié.')
+  }, [
+    isAdmin,
+    layers,
+    routeEnd,
+    routeLine,
+    routeProfile,
+    routeSource,
+    routeStart,
+    syncSupabaseLayers,
+  ])
+
+  useEffect(() => {
+    if (!routeStart || !routeEnd) {
+      setIsRouting(false)
+      setRouteLine([])
+      setRouteDistanceMeters(0)
+      setRouteDurationSeconds(0)
+      setRouteSource(null)
+      return
+    }
+
+    let isCancelled = false
+    setIsRouting(true)
+    setRouteNotice(null)
+
+    const run = async () => {
+      const result = await fetchDedicatedRoute({
+        start: routeStart,
+        end: routeEnd,
+        profile: routeProfile,
+      })
+      if (isCancelled) {
+        return
+      }
+      if (result.ok) {
+        setRouteLine(result.line)
+        setRouteDistanceMeters(result.distanceMeters)
+        setRouteDurationSeconds(result.durationSeconds)
+        setRouteSource(result.source)
+        setIsRouting(false)
+        return
+      }
+
+      const fallbackLine = [routeStart, routeEnd]
+      setRouteLine(fallbackLine)
+      setRouteDistanceMeters(distanceMeters(routeStart, routeEnd))
+      setRouteDurationSeconds(0)
+      setRouteSource('fallback')
+      setRouteNotice(`Routage externe indisponible (${result.error}). Tracé direct utilisé.`)
+      setIsRouting(false)
+    }
+
+    void run()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [routeEnd, routeProfile, routeStart])
 
   const handleLocateUser = useCallback(
     (options?: { silent?: boolean }) => {
@@ -4540,6 +5028,38 @@ function App() {
     statusFilter,
   ])
 
+  const handleCreateMapClone = useCallback(() => {
+    const url = buildCurrentShareUrl()
+    if (!url) {
+      setNavigationNotice('Clone indisponible.')
+      return
+    }
+    const clone: MapCloneEntry = {
+      id: `clone_${crypto.randomUUID()}`,
+      name: `Clone ${new Date().toLocaleString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`,
+      url,
+      createdAt: Date.now(),
+    }
+    setMapClones((current) => [clone, ...current].slice(0, MAX_MAP_CLONES))
+    setNavigationNotice(`Clone créé: ${clone.name}.`)
+  }, [buildCurrentShareUrl])
+
+  const handleOpenMapClone = useCallback((clone: MapCloneEntry) => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.open(clone.url, '_blank', 'noopener,noreferrer')
+  }, [])
+
+  const handleDeleteMapClone = useCallback((cloneId: string) => {
+    setMapClones((current) => current.filter((item) => item.id !== cloneId))
+  }, [])
+
   const handleCopyPermalink = useCallback(async () => {
     const url = buildCurrentShareUrl()
     if (!url) {
@@ -4695,6 +5215,23 @@ function App() {
       const snap = findSnapResult(position)
       const resolvedPosition = snap?.position ?? position
 
+      if (routePickMode === 'start' || routePickMode === 'end') {
+        if (routePickMode === 'start') {
+          setRouteStart(resolvedPosition)
+          setNavigationNotice(
+            `Départ défini${snap ? ` (accroche ${snap.type}).` : '.'}`,
+          )
+        } else {
+          setRouteEnd(resolvedPosition)
+          setNavigationNotice(
+            `Arrivée définie${snap ? ` (accroche ${snap.type}).` : '.'}`,
+          )
+        }
+        setRoutePickMode(null)
+        setRouteNotice(null)
+        return
+      }
+
       if (isMeasureMode) {
         pushLocalHistory('Mesure: ajout point')
         setMeasurePoints((current) => [...current, resolvedPosition])
@@ -4766,6 +5303,7 @@ function App() {
       isRedrawingEditGeometry,
       notifyMeasure,
       pushLocalHistory,
+      routePickMode,
     ],
   )
 
@@ -4959,6 +5497,7 @@ function App() {
     }
 
     setAdminMode('view')
+    setAdminUserId(null)
     setSelectedFeatureId(null)
     setSelectedFeatureIds([])
     setEditDraft(null)
@@ -9358,6 +9897,132 @@ function App() {
               </p>
             </>
           ) : null}
+          <div className="editor-block">
+            <h3>Itinéraire dédié</h3>
+            <label>
+              Profil
+              <select
+                value={routeProfile}
+                onChange={(event) => setRouteProfile(event.target.value as RouteProfile)}
+              >
+                {(Object.entries(ROUTE_PROFILE_LABELS) as [RouteProfile, string][]).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+            <div className="admin-actions-row">
+              <button
+                type="button"
+                className={`ghost-button mini-button${routePickMode === 'start' ? ' active' : ''}`}
+                onClick={() => handleBeginRoutePick('start')}
+              >
+                {routeStart ? 'Départ ✓' : 'Départ'}
+              </button>
+              <button
+                type="button"
+                className={`ghost-button mini-button${routePickMode === 'end' ? ' active' : ''}`}
+                onClick={() => handleBeginRoutePick('end')}
+              >
+                {routeEnd ? 'Arrivée ✓' : 'Arrivée'}
+              </button>
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={handleSwapRouteEndpoints}
+                disabled={!routeStart || !routeEnd}
+              >
+                Inverser
+              </button>
+              <button
+                type="button"
+                className="ghost-button mini-button"
+                onClick={handleResetRoute}
+                disabled={!routeStart && !routeEnd && routeLine.length === 0}
+              >
+                Réinitialiser
+              </button>
+            </div>
+            <p className="muted">
+              Départ:{' '}
+              {routeStart
+                ? `${routeStart[0].toFixed(5)}, ${routeStart[1].toFixed(5)}`
+                : 'non défini'}
+            </p>
+            <p className="muted">
+              Arrivée:{' '}
+              {routeEnd ? `${routeEnd[0].toFixed(5)}, ${routeEnd[1].toFixed(5)}` : 'non définie'}
+            </p>
+            {isRouting ? (
+              <p className="muted">Calcul d’itinéraire en cours...</p>
+            ) : routeLine.length >= 2 ? (
+              <p className="muted">
+                Distance: {formatDistance(routeDistanceMeters)} | Durée:{' '}
+                {routeDurationSeconds > 0 ? formatDuration(routeDurationSeconds) : 'n/d'} | Source:{' '}
+                {routeSource === 'osrm'
+                  ? 'OSRM'
+                  : routeSource === 'fallback'
+                    ? 'Tracé direct'
+                    : 'n/a'}
+              </p>
+            ) : (
+              <p className="muted">Choisis un départ et une arrivée.</p>
+            )}
+            {routeNotice ? <p className="muted">{routeNotice}</p> : null}
+            {isAdmin ? (
+              <button
+                type="button"
+                className="solid-button mini-button"
+                onClick={() => void handleSaveRouteToDedicatedLayer()}
+                disabled={isSaving || isRouting || routeLine.length < 2}
+              >
+                Enregistrer dans "{DEDICATED_ROUTE_LAYER_LABEL}"
+              </button>
+            ) : (
+              <p className="muted">
+                Connecte-toi en admin pour enregistrer l’itinéraire dans un calque.
+              </p>
+            )}
+          </div>
+          <div className="editor-block">
+            <h3>Clones de carte</h3>
+            <button
+              type="button"
+              className="ghost-button mini-button"
+              onClick={handleCreateMapClone}
+            >
+              Créer un clone 1 clic
+            </button>
+            {mapClones.length === 0 ? (
+              <p className="muted">Aucun clone enregistré.</p>
+            ) : (
+              <ul className="bookmark-list">
+                {mapClones.map((clone) => (
+                  <li key={clone.id}>
+                    <button
+                      type="button"
+                      className="bookmark-go"
+                      onClick={() => handleOpenMapClone(clone)}
+                      title={new Date(clone.createdAt).toLocaleString('fr-FR')}
+                    >
+                      {clone.name}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button mini-button"
+                      onClick={() => handleDeleteMapClone(clone.id)}
+                      title="Supprimer ce clone"
+                    >
+                      Suppr.
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           {navigationNotice ? <p className="muted">{navigationNotice}</p> : null}
           <p className="muted">
             Curseur:{' '}
@@ -9662,6 +10327,14 @@ function App() {
                   ? null
                   : block.layers.map((layer, index) => {
                       const layerLocked = isLayerLocked(block.category, layer.id)
+                      const layerWritableByPermission = isLayerWritableByPermission(
+                        block.category,
+                        layer.id,
+                      )
+                      const layerPermission = getLayerPermission(
+                        block.category,
+                        layer.id,
+                      )
                       const layerZoomKey = toLayerLockKey(block.category, layer.id)
                       const zoomRule = layerZoomVisibility[layerZoomKey] ?? {
                         minZoom: 10,
@@ -9695,6 +10368,8 @@ function App() {
                           <p className="layer-row-meta">
                             {layerVisibleCountById.get(layer.id) ?? 0}/{layer.features.length}{' '}
                             élément(s) avec filtres
+                            {!layerPermission.isPublicVisible ? ' | privé' : ''}
+                            {!layerWritableByPermission ? ' | écriture restreinte' : ''}
                           </p>
                           {isAdmin ? (
                             <details className="layer-row-actions">
@@ -10009,6 +10684,74 @@ function App() {
                                 >
                                   Réinitialiser style
                                 </button>
+                              </div>
+                              <div className="layer-uniform-style-controls">
+                                <p className="muted">
+                                  Public: {layerPermission.isPublicVisible ? 'oui' : 'non'} |
+                                  Écriture authentifiée:{' '}
+                                  {layerPermission.allowAuthenticatedWrite
+                                    ? 'oui'
+                                    : 'restreinte'}{' '}
+                                  | Éditeurs explicites:{' '}
+                                  {layerPermission.allowedEditorIds.length}
+                                </p>
+                                {layerPermission.allowedEditorIds.length > 0 ? (
+                                  <p className="muted">
+                                    {layerPermission.allowedEditorIds.join(', ')}
+                                  </p>
+                                ) : (
+                                  <p className="muted">Aucun éditeur explicite.</p>
+                                )}
+                                {isAdmin ? (
+                                  <div className="admin-actions-row">
+                                    <label className="control-row">
+                                      <input
+                                        type="checkbox"
+                                        checked={layerPermission.isPublicVisible}
+                                        onChange={(event) =>
+                                          void handleUpdateLayerPermission(
+                                            block.category,
+                                            layer.id,
+                                            { isPublicVisible: event.target.checked },
+                                          )
+                                        }
+                                        disabled={isSaving}
+                                      />
+                                      <span>Visible publiquement</span>
+                                    </label>
+                                    <label className="control-row">
+                                      <input
+                                        type="checkbox"
+                                        checked={layerPermission.allowAuthenticatedWrite}
+                                        onChange={(event) =>
+                                          void handleUpdateLayerPermission(
+                                            block.category,
+                                            layer.id,
+                                            {
+                                              allowAuthenticatedWrite:
+                                                event.target.checked,
+                                            },
+                                          )
+                                        }
+                                        disabled={isSaving}
+                                      />
+                                      <span>Écriture pour comptes connectés</span>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      className="ghost-button mini-button"
+                                      onClick={() =>
+                                        void handlePromptLayerEditors(
+                                          block.category,
+                                          layer.id,
+                                        )
+                                      }
+                                      disabled={isSaving}
+                                    >
+                                      Gérer éditeurs
+                                    </button>
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           </details>
@@ -11220,6 +11963,52 @@ function App() {
                 dashArray: '5 4',
               }}
             />
+          ) : null}
+          {routeLine.length >= 2 ? (
+            <Polyline
+              positions={routeLine}
+              interactive={false}
+              pathOptions={{
+                color: ROUTE_PROFILE_COLORS[routeProfile],
+                weight: 5,
+                opacity: 0.95,
+                dashArray: routeSource === 'fallback' ? '8 6' : undefined,
+              }}
+            />
+          ) : null}
+          {routeStart ? (
+            <CircleMarker
+              center={routeStart}
+              radius={7}
+              interactive={false}
+              pathOptions={{
+                color: '#065f46',
+                fillColor: '#10b981',
+                fillOpacity: 0.92,
+                weight: 2,
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} permanent>
+                Départ
+              </Tooltip>
+            </CircleMarker>
+          ) : null}
+          {routeEnd ? (
+            <CircleMarker
+              center={routeEnd}
+              radius={7}
+              interactive={false}
+              pathOptions={{
+                color: '#7f1d1d',
+                fillColor: '#ef4444',
+                fillOpacity: 0.92,
+                weight: 2,
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} permanent>
+                Arrivée
+              </Tooltip>
+            </CircleMarker>
           ) : null}
           {isMeasureMode && measurePreviewPoints.length > 0 ? (
             measureGeometry === 'polygon' ? (

@@ -67,6 +67,33 @@ create index if not exists idx_map_layers_category_order
 create unique index if not exists idx_map_layers_category_label_lower
   on public.map_layers (category, lower(label));
 
+create table if not exists public.map_layer_permissions (
+  layer_id text primary key,
+  is_public_visible boolean not null default true,
+  allow_authenticated_write boolean not null default true,
+  allowed_editor_ids uuid[] not null default '{}'::uuid[],
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.map_layer_permissions
+  add column if not exists is_public_visible boolean not null default true;
+
+alter table public.map_layer_permissions
+  add column if not exists allow_authenticated_write boolean not null default true;
+
+alter table public.map_layer_permissions
+  add column if not exists allowed_editor_ids uuid[] not null default '{}'::uuid[];
+
+alter table public.map_layer_permissions
+  add column if not exists created_at timestamptz not null default timezone('utc', now());
+
+alter table public.map_layer_permissions
+  add column if not exists updated_at timestamptz not null default timezone('utc', now());
+
+create index if not exists idx_map_layer_permissions_public
+  on public.map_layer_permissions (is_public_visible);
+
 do $$
 declare
   has_non_zero_order boolean;
@@ -165,6 +192,14 @@ begin
 end;
 $$ language plpgsql;
 
+create or replace function public.set_map_layer_permissions_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$ language plpgsql;
+
 drop trigger if exists trg_map_features_updated_at on public.map_features;
 create trigger trg_map_features_updated_at
 before update on public.map_features
@@ -174,6 +209,11 @@ drop trigger if exists trg_map_layers_updated_at on public.map_layers;
 create trigger trg_map_layers_updated_at
 before update on public.map_layers
 for each row execute function public.set_map_layers_updated_at();
+
+drop trigger if exists trg_map_layer_permissions_updated_at on public.map_layer_permissions;
+create trigger trg_map_layer_permissions_updated_at
+before update on public.map_layer_permissions
+for each row execute function public.set_map_layer_permissions_updated_at();
 
 create or replace function public.ensure_map_layers_from_feature()
 returns trigger
@@ -245,32 +285,149 @@ create trigger trg_map_features_ensure_layers
 before insert or update on public.map_features
 for each row execute function public.ensure_map_layers_from_feature();
 
+create or replace function public.ensure_map_layer_permission_from_layer()
+returns trigger
+language plpgsql
+as $$
+begin
+  insert into public.map_layer_permissions (layer_id)
+  values (new.id)
+  on conflict (layer_id) do nothing;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_map_layers_ensure_permissions on public.map_layers;
+create trigger trg_map_layers_ensure_permissions
+after insert on public.map_layers
+for each row execute function public.ensure_map_layer_permission_from_layer();
+
+insert into public.map_layer_permissions (layer_id)
+select id
+from public.map_layers
+on conflict (layer_id) do nothing;
+
+create or replace function public.can_read_layer(target_layer_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (
+      select p.is_public_visible or auth.role() = 'authenticated'
+      from public.map_layer_permissions as p
+      where p.layer_id = target_layer_id
+      limit 1
+    ),
+    true
+  );
+$$;
+
+create or replace function public.can_write_layer(target_layer_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when auth.role() <> 'authenticated' then false
+    else coalesce(
+      (
+        select p.allow_authenticated_write
+          or auth.uid() = any(p.allowed_editor_ids)
+        from public.map_layer_permissions as p
+        where p.layer_id = target_layer_id
+        limit 1
+      ),
+      true
+    )
+  end;
+$$;
+
 alter table public.map_features enable row level security;
 alter table public.map_layers enable row level security;
+alter table public.map_layer_permissions enable row level security;
 
 drop policy if exists "Public read map_features" on public.map_features;
 create policy "Public read map_features"
 on public.map_features
 for select
-using (deleted_at is null);
+using (deleted_at is null and public.can_read_layer(layer_id));
 
 drop policy if exists "Authenticated write map_features" on public.map_features;
-create policy "Authenticated write map_features"
+drop policy if exists "Authenticated insert map_features" on public.map_features;
+drop policy if exists "Authenticated update map_features" on public.map_features;
+drop policy if exists "Authenticated delete map_features" on public.map_features;
+
+create policy "Authenticated insert map_features"
 on public.map_features
-for all
+for insert
 to authenticated
-using (true)
-with check (true);
+with check (public.can_write_layer(layer_id));
+
+create policy "Authenticated update map_features"
+on public.map_features
+for update
+to authenticated
+using (public.can_write_layer(layer_id))
+with check (public.can_write_layer(layer_id));
+
+create policy "Authenticated delete map_features"
+on public.map_features
+for delete
+to authenticated
+using (public.can_write_layer(layer_id));
 
 drop policy if exists "Public read map_layers" on public.map_layers;
 create policy "Public read map_layers"
 on public.map_layers
 for select
-using (true);
+using (public.can_read_layer(id));
 
 drop policy if exists "Authenticated write map_layers" on public.map_layers;
-create policy "Authenticated write map_layers"
+drop policy if exists "Authenticated insert map_layers" on public.map_layers;
+drop policy if exists "Authenticated update map_layers" on public.map_layers;
+drop policy if exists "Authenticated delete map_layers" on public.map_layers;
+
+create policy "Authenticated insert map_layers"
 on public.map_layers
+for insert
+to authenticated
+with check (true);
+
+create policy "Authenticated update map_layers"
+on public.map_layers
+for update
+to authenticated
+using (public.can_write_layer(id))
+with check (public.can_write_layer(id));
+
+create policy "Authenticated delete map_layers"
+on public.map_layers
+for delete
+to authenticated
+using (public.can_write_layer(id));
+
+drop policy if exists "Public read map_layer_permissions" on public.map_layer_permissions;
+create policy "Public read map_layer_permissions"
+on public.map_layer_permissions
+for select
+using (is_public_visible = true);
+
+drop policy if exists "Authenticated read map_layer_permissions" on public.map_layer_permissions;
+create policy "Authenticated read map_layer_permissions"
+on public.map_layer_permissions
+for select
+to authenticated
+using (true);
+
+drop policy if exists "Authenticated write map_layer_permissions" on public.map_layer_permissions;
+create policy "Authenticated write map_layer_permissions"
+on public.map_layer_permissions
 for all
 to authenticated
 using (true)

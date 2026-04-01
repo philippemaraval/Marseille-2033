@@ -2,6 +2,7 @@ import type {
   BuiltInPointIconId,
   FeatureStyle,
   GeometryFeature,
+  LayerPermission,
   LayerConfig,
   StatusId,
 } from '../types/map'
@@ -32,6 +33,13 @@ interface MapLayerMetaRow {
   category: string
   section_sort_order: number | null
   sort_order: number | null
+}
+
+interface MapLayerPermissionRow {
+  layer_id: string
+  is_public_visible: boolean | null
+  allow_authenticated_write: boolean | null
+  allowed_editor_ids: string[] | null
 }
 
 const STATUS_DEFAULT_COLOR: Record<StatusId, string> = {
@@ -253,6 +261,39 @@ function isMissingLayerMetadataSchemaError(message: string): boolean {
   )
 }
 
+function isMissingLayerPermissionSchemaError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    (normalized.includes('relation') &&
+      normalized.includes('map_layer_permissions') &&
+      normalized.includes('does not exist')) ||
+    (normalized.includes('could not find the table') &&
+      normalized.includes('map_layer_permissions') &&
+      normalized.includes('schema cache')) ||
+    (normalized.includes('column') &&
+      normalized.includes('is_public_visible') &&
+      normalized.includes('does not exist'))
+  )
+}
+
+function buildDefaultLayerPermission(): LayerPermission {
+  return {
+    isPublicVisible: true,
+    allowAuthenticatedWrite: true,
+    allowedEditorIds: [],
+  }
+}
+
+function normalizeAllowedEditorIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+}
+
 function normalizeLayerSortOrder(value: number | null | undefined): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
@@ -395,6 +436,37 @@ function buildLayersFromRowsWithMetadata(
   }
 
   return sortLayers(Array.from(layerMap.values()))
+}
+
+function applyLayerPermissions(
+  layers: LayerConfig[],
+  rows: MapLayerPermissionRow[],
+): LayerConfig[] {
+  if (rows.length === 0) {
+    return layers.map((layer) => ({
+      ...layer,
+      permissions: buildDefaultLayerPermission(),
+    }))
+  }
+
+  const permissionByLayerId = new Map<string, LayerPermission>()
+  for (const row of rows) {
+    permissionByLayerId.set(row.layer_id, {
+      isPublicVisible:
+        typeof row.is_public_visible === 'boolean' ? row.is_public_visible : true,
+      allowAuthenticatedWrite:
+        typeof row.allow_authenticated_write === 'boolean'
+          ? row.allow_authenticated_write
+          : true,
+      allowedEditorIds: normalizeAllowedEditorIds(row.allowed_editor_ids),
+    })
+  }
+
+  return layers.map((layer) => ({
+    ...layer,
+    permissions:
+      permissionByLayerId.get(layer.id) ?? buildDefaultLayerPermission(),
+  }))
 }
 
 async function fetchRowsWithCurrentSchema(): Promise<
@@ -593,6 +665,48 @@ async function fetchLayerMetadataRows(): Promise<
   return { ok: true, rows }
 }
 
+async function fetchLayerPermissionRows(): Promise<
+  | { ok: true; rows: MapLayerPermissionRow[] }
+  | { ok: false; error: string; missingSchema: boolean }
+> {
+  if (!supabase) {
+    return { ok: false, error: 'Supabase non configure.', missingSchema: false }
+  }
+
+  const pageSize = 1000
+  let offset = 0
+  const rows: MapLayerPermissionRow[] = []
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from('map_layer_permissions')
+      .select(
+        'layer_id,is_public_visible,allow_authenticated_write,allowed_editor_ids',
+      )
+      .order('layer_id')
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message,
+        missingSchema: isMissingLayerPermissionSchemaError(error.message),
+      }
+    }
+
+    const pageRows = (data || []) as MapLayerPermissionRow[]
+    rows.push(...pageRows)
+
+    if (pageRows.length < pageSize) {
+      break
+    }
+
+    offset += pageSize
+  }
+
+  return { ok: true, rows }
+}
+
 export async function fetchLayersFromSupabase(): Promise<FetchResult> {
   if (!hasSupabase || !supabase) {
     return {
@@ -622,14 +736,25 @@ export async function fetchLayersFromSupabase(): Promise<FetchResult> {
   }
 
   const metadataResult = await fetchLayerMetadataRows()
+  const permissionsResult = await fetchLayerPermissionRows()
+
+  let permissionRows: MapLayerPermissionRow[] = []
+  if (permissionsResult.ok) {
+    permissionRows = permissionsResult.rows
+  } else if (!permissionsResult.missingSchema) {
+    return { ok: false, error: permissionsResult.error }
+  }
 
   if (metadataResult.ok) {
-    const layers = buildLayersFromRowsWithMetadata(featureRows, metadataResult.rows)
+    const layers = applyLayerPermissions(
+      buildLayersFromRowsWithMetadata(featureRows, metadataResult.rows),
+      permissionRows,
+    )
     return { ok: true, layers }
   }
 
   if (metadataResult.missingSchema) {
-    const layers = buildLayersFromFeatureRows(featureRows)
+    const layers = applyLayerPermissions(buildLayersFromFeatureRows(featureRows), permissionRows)
     return { ok: true, layers }
   }
 

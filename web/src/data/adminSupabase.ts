@@ -1,5 +1,5 @@
 import { hasSupabase, supabase } from '../lib/supabase'
-import type { FeatureStyle, StatusId } from '../types/map'
+import type { FeatureStyle, LayerPermission, StatusId } from '../types/map'
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -73,6 +73,13 @@ interface CreateLayerMetadataInput {
   sectionSortOrder: number
 }
 
+export interface UpdateLayerPermissionInput {
+  layerId: string
+  isPublicVisible: boolean
+  allowAuthenticatedWrite: boolean
+  allowedEditorIds: string[]
+}
+
 export interface ImportFeatureInsert {
   id: string
   name: string
@@ -115,6 +122,21 @@ function isMissingLayerRegistrySchemaError(message: string): boolean {
       normalized.includes('schema cache')) ||
     (normalized.includes('column') &&
       normalized.includes('section_sort_order') &&
+      normalized.includes('does not exist'))
+  )
+}
+
+function isMissingLayerPermissionSchemaError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    (normalized.includes('relation') &&
+      normalized.includes('map_layer_permissions') &&
+      normalized.includes('does not exist')) ||
+    (normalized.includes('could not find the table') &&
+      normalized.includes('map_layer_permissions') &&
+      normalized.includes('schema cache')) ||
+    (normalized.includes('column') &&
+      normalized.includes('is_public_visible') &&
       normalized.includes('does not exist'))
   )
 }
@@ -444,6 +466,53 @@ export async function createLayerMetadata(
   }
 
   return { ok: true, data: null }
+}
+
+export async function updateLayerPermissions(
+  input: UpdateLayerPermissionInput,
+): Promise<Result<LayerPermission>> {
+  if (!hasSupabase || !supabase) {
+    return { ok: false, error: 'Supabase non configure.' }
+  }
+
+  const normalizedIds = Array.from(
+    new Set(
+      input.allowedEditorIds
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  )
+
+  const payload = {
+    layer_id: input.layerId,
+    is_public_visible: input.isPublicVisible,
+    allow_authenticated_write: input.allowAuthenticatedWrite,
+    allowed_editor_ids: normalizedIds,
+  }
+
+  const { error } = await supabase.from('map_layer_permissions').upsert(payload, {
+    onConflict: 'layer_id',
+  })
+
+  if (error) {
+    if (isMissingLayerPermissionSchemaError(error.message)) {
+      return {
+        ok: false,
+        error:
+          'Permissions par calque indisponibles. Execute web/supabase/schema.sql dans SQL Editor.',
+      }
+    }
+    return { ok: false, error: normalizeAdminError(error.message) }
+  }
+
+  return {
+    ok: true,
+    data: {
+      isPublicVisible: input.isPublicVisible,
+      allowAuthenticatedWrite: input.allowAuthenticatedWrite,
+      allowedEditorIds: normalizedIds,
+    },
+  }
 }
 
 export async function renameLayerMetadata(

@@ -35,6 +35,12 @@ export interface FeatureStyle {
   polygonBorderMode?: PolygonBorderMode
 }
 
+export interface LayerPermission {
+  isPublicVisible: boolean
+  allowAuthenticatedWrite: boolean
+  allowedEditorIds: string[]
+}
+
 export interface BaseFeature {
   id: string
   name: string
@@ -66,5 +72,6 @@ export interface LayerConfig {
   category: string
   sectionSortOrder?: number
   sortOrder?: number
+  permissions?: LayerPermission
   features: GeometryFeature[]
 }
